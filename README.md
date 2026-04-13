@@ -80,12 +80,26 @@ most commonly asked-about layers in AI platform engineering interviews.
 
 ## Quick Start
 
-### 1. Start Milvus (+ Attu UI)
-
-Requires Docker and Docker Compose.
+### 1. Install Docker (Ubuntu 25.04)
 
 ```bash
-docker compose up -d
+sudo apt update
+sudo apt install docker.io docker-compose -y
+sudo systemctl enable --now docker
+
+# Add your user to the docker group so you don't need sudo
+sudo usermod -aG docker $USER
+newgrp docker          # apply group change in the current shell
+```
+
+> **Note:** Ubuntu 25.04 ships `docker.io` (28.x) which uses the hyphenated
+> `docker-compose` command, not `docker compose`. All commands below use
+> `docker-compose` accordingly.
+
+### 2. Start Milvus (+ Attu UI)
+
+```bash
+docker-compose up -d
 ```
 
 Wait ~60 seconds, then verify Milvus is healthy:
@@ -95,13 +109,22 @@ curl http://localhost:9091/healthz
 # → {"status":"healthy"}
 ```
 
-Open Attu (vector DB web UI) at **http://localhost:5160** — useful for
-browsing collections and visualising embeddings.
-
-### 2. Python environment
+**Attu** (vector DB web UI) runs on port 5160. Access it via SSH tunnel from
+your local machine — do **not** expose this port publicly:
 
 ```bash
-python -m venv .venv
+# On your local machine:
+ssh -L 5160:localhost:5160 user@your-vps
+# Then open http://localhost:5160 in your browser
+```
+
+### 3. Python environment
+
+Ubuntu 25.04 needs the venv package installed separately:
+
+```bash
+sudo apt install python3.13-venv -y
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
@@ -291,19 +314,24 @@ To run the full stack there:
 # 1. Copy the project to the VPS
 scp -r . user@your-vps:~/pipeline
 
-# 2. SSH in
-ssh user@your-vps
+# 2. SSH in (with port forward for Attu UI)
+ssh -L 5160:localhost:5160 user@your-vps
 
-# 3. Start Milvus
+# 3. Install Docker if not present (Ubuntu 25.04)
+sudo apt update && sudo apt install docker.io docker-compose python3.13-venv -y
+sudo systemctl enable --now docker
+sudo usermod -aG docker $USER && newgrp docker
+
+# 4. Start Milvus
 cd ~/pipeline
-docker compose up -d
+docker-compose up -d
 
-# 4. Set up Python env (same steps as local)
+# 5. Set up Python env
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env && nano .env
 
-# 5. Ingest and query
+# 6. Ingest and query
 python scripts/ingest.py docs/
 python scripts/query.py
 ```
@@ -336,10 +364,76 @@ Key things you can speak to:
 
 ---
 
+## Next Steps (after first working query)
+
+Once you have a query returning an answer, work through these in order — each
+one adds something you can specifically talk about in an interview.
+
+### 1. LangSmith traces (15 min)
+
+Sign up at [smith.langchain.com](https://smith.langchain.com) (free, no credit
+card). Create a Personal Access Token, then add to `.env`:
+
+```dotenv
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=ls__...
+LANGCHAIN_PROJECT=research-pipeline
+```
+
+No code changes needed. Run a query — the trace appears in the LangSmith
+dashboard within seconds. You can show the routing decision, each agent's
+prompt/completion, token counts, and latency per step.
+
+### 2. Ingest more interesting docs
+
+The more relevant your docs, the more impressive the RAG route looks:
+
+```bash
+# LangGraph docs
+curl -sL https://raw.githubusercontent.com/langchain-ai/langgraph/main/README.md \
+  -o docs/langgraph-readme.md
+
+# Milvus docs overview
+curl -sL https://raw.githubusercontent.com/milvus-io/milvus/master/README.md \
+  -o docs/milvus-readme.md
+
+python scripts/ingest.py docs/
+```
+
+### 3. Demo queries that show off routing
+
+```bash
+# Forces RAG (answer is in your ingested docs)
+python scripts/query.py "What are the main components of LangGraph?" -v
+
+# Forces web search (time-sensitive)
+python scripts/query.py "What is the latest stable release of Milvus?" -v
+
+# Forces both — the money shot
+python scripts/query.py "How does LangGraph compare to alternatives and what's new in it?" -v
+```
+
+Watch the `Routed to:` line — this is what you demo to the interviewer.
+
+### 4. Browse embeddings in Attu
+
+Open [http://localhost:5160](http://localhost:5160) (via SSH tunnel), connect
+to `localhost:19530`, and explore the `research_docs` collection. You can see
+vector counts, schema, and run similarity searches visually.
+
+---
+
 ## Roadmap
 
-- [ ] Add a memory/persistence layer using LangGraph checkpointers (SQLite or Redis)
-- [ ] Streaming responses via `pipeline.astream()`
-- [ ] FastAPI wrapper so the pipeline is callable as a REST endpoint
-- [ ] Hybrid search in Milvus (dense + sparse BM25)
-- [ ] Docker image for the Python app so the whole stack is one `compose up`
+- [ ] **Memory** — LangGraph checkpointers (SQLite or Redis) so the pipeline
+      remembers previous queries in a session
+- [ ] **Streaming** — `pipeline.astream()` so answers print token-by-token
+      instead of all at once
+- [ ] **FastAPI wrapper** — expose the pipeline as a REST endpoint so it's
+      callable from any client
+- [ ] **Hybrid search** — combine dense vector search with sparse BM25 in
+      Milvus for better retrieval on exact-match queries
+- [ ] **Full Docker stack** — Dockerfile for the Python app so the whole
+      system (Milvus + app) starts with one `docker-compose up`
+- [ ] **Evaluation** — add a test set of questions with expected answers and
+      measure RAG retrieval quality (recall@k)
