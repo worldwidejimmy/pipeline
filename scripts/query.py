@@ -22,13 +22,13 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.graph.pipeline import run
+from src.graph.pipeline import pipeline
 
 app = typer.Typer(help="Query the multi-agent research pipeline.")
 console = Console()
 
 
-def _run_with_spinner(query: str) -> tuple[str, float]:
+def _run_with_spinner(query: str) -> tuple[str, str, float]:
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -37,9 +37,12 @@ def _run_with_spinner(query: str) -> tuple[str, float]:
     ) as progress:
         progress.add_task("Thinking…", total=None)
         t0 = time.monotonic()
-        answer = run(query)
+        final_state = pipeline.invoke({"query": query})
         elapsed = time.monotonic() - t0
-    return answer, elapsed
+
+    answer = final_state.get("final_answer", "No answer produced.")
+    route = final_state.get("route", "unknown")
+    return answer, route, elapsed
 
 
 @app.command()
@@ -67,9 +70,19 @@ def main(
     _ask(query, verbose)
 
 
+_ROUTE_LABELS = {
+    "rag":    "[bold blue]📚 RAG[/bold blue]       → searching internal documents",
+    "search": "[bold yellow]🌐 Web search[/bold yellow] → querying Tavily live web",
+    "both":   "[bold magenta]📚+🌐 Both[/bold magenta]     → RAG + web search in parallel",
+}
+
+
 def _ask(query: str, verbose: bool) -> None:
     console.print()
-    answer, elapsed = _run_with_spinner(query)
+    answer, route, elapsed = _run_with_spinner(query)
+
+    label = _ROUTE_LABELS.get(route, f"[dim]route: {route}[/dim]")
+    console.print(f"  Routed to: {label}\n")
 
     console.print(
         Panel(
