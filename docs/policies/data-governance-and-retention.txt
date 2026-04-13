@@ -1,0 +1,257 @@
+DATA GOVERNANCE AND RETENTION POLICY
+Meridian Data Corp
+Version: 2.1
+Effective Date: 2025-01-01
+Owner: Data Governance Committee
+Last Review: 2025-09-15
+
+==============================================================
+1. PURPOSE AND SCOPE
+==============================================================
+
+This policy defines the standards and requirements for data classification,
+retention, access control, and disposal at Meridian Data Corp. It applies
+to all employees, contractors, and third-party vendors who access, process,
+or store Meridian data.
+
+==============================================================
+2. DATA CLASSIFICATION
+==============================================================
+
+2.1 Classification Levels
+
+LEVEL 1 — PUBLIC
+Data intended for public disclosure. No restrictions on sharing.
+Examples: press releases, public API documentation, job postings.
+
+LEVEL 2 — INTERNAL
+Data intended for internal use only. Not for public disclosure but
+not specifically sensitive.
+Examples: internal wikis, process documentation, org charts,
+engineering runbooks, meeting notes.
+
+LEVEL 3 — CONFIDENTIAL
+Sensitive business data. Access on a need-to-know basis.
+Examples: financial reports, customer contracts, product roadmaps,
+partner agreements, employee performance reviews.
+
+LEVEL 4 — RESTRICTED
+Highly sensitive data. Strictly controlled. Requires explicit
+authorization and audit trail.
+Examples: PII (personally identifiable information), payment card data,
+credentials and secrets, M&A information, legal hold documents,
+MNPI (material non-public information), security vulnerabilities.
+
+2.2 Default Classification
+
+When in doubt, classify data as CONFIDENTIAL (Level 3) until
+a determination can be made. Do not classify down without approval
+from the data owner.
+
+2.3 Data Owner Responsibilities
+
+Each dataset must have a designated Data Owner responsible for:
+- Assigning and maintaining data classification
+- Approving access requests beyond default group permissions
+- Reviewing and approving data sharing with third parties
+- Ensuring retention schedules are applied
+
+==============================================================
+3. DATA RETENTION SCHEDULES
+==============================================================
+
+3.1 Retention by Data Type
+
+Customer PII and Account Data:
+- Active account data: Retained for duration of account + 2 years
+- Deleted account data: Purged within 30 days of deletion request (GDPR/CCPA)
+- Transaction records: 7 years (financial regulation)
+
+Engineering Data:
+- Production logs: 90 days (Elasticsearch/Kibana rolling retention)
+- Application metrics (Prometheus): 15 days hot, 1 year in Thanos long-term storage
+- Build artifacts (Docker images, binaries): 1 year or until superseded
+- Git history: Indefinite
+- Incident records and postmortems: 5 years
+- Security scan results: 2 years
+
+ML/AI Data:
+- Training datasets: 3 years or until model is decommissioned + 1 year
+- Model artifacts and weights: Duration of model production use + 2 years
+- Inference logs (for debugging): 30 days
+- Evaluation datasets: 3 years
+- Embedding vectors in production vector stores: Duration of pipeline use + 6 months
+
+Business Data:
+- Financial records: 7 years (IRS requirements)
+- Employee records: Duration of employment + 7 years
+- Legal hold documents: Until hold is released + 1 year
+- Email communications: 3 years
+- Contracts: 10 years after expiration
+
+3.2 Retention System
+
+Automated retention enforcement is managed through:
+- Elasticsearch: ILM (Index Lifecycle Management) policies, configured per index
+- S3/GCS: Object lifecycle rules, automated via Terraform
+- PostgreSQL: Partitioned tables with automated partition drops (managed by DBA team)
+- Milvus/Vector stores: Manual collection archival — ML Platform team owns schedule
+
+Data owners are responsible for registering datasets with the Data Catalog
+(accessible at catalog.internal) and tagging with the appropriate retention policy.
+
+==============================================================
+4. ACCESS CONTROL
+==============================================================
+
+4.1 Principles
+
+Least Privilege: Users and systems should be granted only the access
+required for their specific function.
+
+Need-to-Know: Level 3 and Level 4 data access requires a documented
+business justification.
+
+Separation of Duties: No single individual should have unchecked access
+to create, approve, and audit sensitive data changes.
+
+4.2 Access Groups
+
+All data access is managed through Okta groups. Access requests are
+submitted through the IT Service Portal and require manager approval
+for Level 3 data and manager + Data Owner approval for Level 4 data.
+
+Standard groups:
+- engineering-all: Read access to internal documentation, runbooks (Level 2)
+- ml-platform: Access to ML datasets and model artifacts (Level 3)
+- data-platform-ops: Read/write to production data pipelines (Level 3)
+- dba-team: Database admin access (Level 4 gated)
+- secops: Security tooling and vulnerability data (Level 4)
+- finance-team: Financial data access (Level 4)
+
+4.3 Service Account Access
+
+Service accounts (used by automated systems, CI/CD, and APIs) must:
+- Be registered in the Service Account Registry (IT Service Portal)
+- Have credentials stored in Vault (vault.internal), never in code or config files
+- Have access scoped to the minimum required for their function
+- Rotate credentials every 90 days (automated for most services via Vault dynamic secrets)
+
+4.4 Third-Party Data Sharing
+
+Sharing Level 3 or Level 4 data with third parties requires:
+- Legal review and executed DPA (Data Processing Agreement) or NDA
+- Approval from VP of Legal and data owner
+- Security review if third party will store or process the data
+- Logging of all data transferred in the Data Transfer Registry
+
+Sending any customer PII to external AI/LLM services (OpenAI, Anthropic,
+Google, etc.) is PROHIBITED unless:
+- Data is anonymized or pseudonymized first
+- A BAA or equivalent agreement is in place with the vendor
+- Legal and Security have reviewed and approved the use case
+
+==============================================================
+5. PII HANDLING REQUIREMENTS
+==============================================================
+
+5.1 PII Categories
+
+The following are considered PII at Meridian:
+- Name (full name)
+- Email address
+- Phone number
+- Physical address
+- Date of birth
+- Government ID numbers (SSN, passport, etc.)
+- Payment card information
+- IP addresses (when linked to individual)
+- Device identifiers (when linked to individual)
+- Biometric data
+- Location data with precision <= 1km
+- Audio or video recordings of individuals
+
+5.2 PII in Engineering Systems
+
+PROHIBITED:
+- PII in logs (use user_id or anonymized tokens instead)
+- PII in error messages or stack traces
+- PII in analytics events (use anonymized identifiers)
+- PII in test data (use synthetic data generators)
+- PII in RAG training or ingestion pipelines without Legal approval
+
+If you discover PII in a system where it should not be, report immediately
+to secops@meridian.com and your manager. Do not delete without guidance
+as deletion may itself be a compliance issue.
+
+5.3 PII Detection Tools
+
+Automated PII scanning is available via:
+- The Data Platform API: POST /v2/privacy/scan (returns PII confidence scores)
+- CI pre-commit hook: runs presidio-based PII detection on log outputs
+- Weekly scheduled scans on S3 buckets and GCS buckets (configured by default)
+
+==============================================================
+6. AI AND LLM-SPECIFIC REQUIREMENTS
+==============================================================
+
+6.1 Data in AI Pipelines
+
+All AI/ML pipelines ingesting internal data must:
+- Document data sources in the ML Platform Data Catalog
+- Apply appropriate anonymization before ingesting PII
+- Obtain approval from the Data Governance Committee for Level 4 data
+- Log all data ingested with timestamps for audit purposes
+
+6.2 RAG Pipeline Governance
+
+RAG pipelines that expose internal data through LLM interfaces must:
+- Restrict retrieval to data the querying user has access to (access-controlled retrieval)
+- Not cache retrieved results beyond the session
+- Log all queries and retrieved document IDs for 30 days for audit purposes
+- Implement guardrails to prevent exfiltration of Restricted data through LLM output
+
+6.3 Model Training Data
+
+Data used to fine-tune or train models is subject to the same classification
+and retention rules as the source data. Additionally:
+- Training data must be versioned and documented in the ML Platform Data Catalog
+- Data lineage must be traceable (source → preprocessing → training dataset)
+- Synthetic data generated to replace PII must be documented as synthetic
+
+==============================================================
+7. INCIDENT REPORTING
+==============================================================
+
+Data breaches or suspected unauthorized access to Level 3 or Level 4 data
+must be reported within 1 hour of discovery to:
+- secops@meridian.com
+- Your direct manager
+- The Data Governance Committee DL: data-governance@meridian.com
+
+Response to confirmed breaches will follow the Data Breach Response Playbook
+(Confluence: Legal > Data Breach Response).
+
+GDPR breach notification: If EU resident data is involved, Legal must be
+notified within 24 hours. Notification to supervisory authority may be
+required within 72 hours.
+
+==============================================================
+8. POLICY EXCEPTIONS
+==============================================================
+
+Exceptions to this policy require written approval from the Data Governance
+Committee and the VP of Legal. Exception requests are submitted through
+the IT Service Portal. All approved exceptions are logged and subject to
+annual review.
+
+==============================================================
+9. TRAINING AND ACKNOWLEDGMENT
+==============================================================
+
+All employees and contractors must complete the Data Governance Training
+module annually via the Learning Management System (LMS). Completion is
+tracked and non-compliance is escalated to HR.
+
+Questions about this policy: data-governance@meridian.com
+Policy repository: Confluence > Legal & Compliance > Data Governance
