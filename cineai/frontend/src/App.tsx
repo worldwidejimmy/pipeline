@@ -8,12 +8,12 @@ import { MetricsBar } from './components/MetricsBar'
 import { ChunksPanel } from './components/ChunksPanel'
 
 const EXAMPLE_QUERIES = [
-  'Show me good bank heist movies',
-  'What are trending movies this week?',
-  'Tell me about Inception — cast, rating, themes',
-  'Top sci-fi films of all time',
-  'Christopher Nolan directing style',
-  'Best horror movies rated above 8',
+  { icon: '🕵️', text: 'Show me good bank heist movies' },
+  { icon: '🔥', text: 'Trending movies this week' },
+  { icon: '🎭', text: 'Tell me about Inception — cast, rating, themes' },
+  { icon: '🚀', text: 'Top sci-fi films of all time' },
+  { icon: '🎬', text: "Christopher Nolan's directing style" },
+  { icon: '👻', text: 'Best horror movies rated above 8' },
 ]
 
 type ObsTab = 'graph' | 'timeline' | 'events' | 'context'
@@ -42,19 +42,16 @@ export default function App() {
   const answerEndRef = useRef<HTMLDivElement>(null)
   const historyRef   = useRef<HTMLDivElement>(null)
 
-  // Auto-scroll answer panel
   useEffect(() => {
     answerEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [answer])
 
-  // Auto-scroll history to bottom
   useEffect(() => {
     if (historyRef.current) {
       historyRef.current.scrollTop = historyRef.current.scrollHeight
     }
   }, [history])
 
-  // Load trending on mount
   useEffect(() => {
     fetch('/api/trending')
       .then(r => r.json())
@@ -118,14 +115,12 @@ export default function App() {
       addEvent('done', e)
       setStream(false)
       es.close()
-      // Append turn to local history
       if (currentAnswer) {
         setHistory(prev => [...prev, { q: q.trim(), a: currentAnswer }])
       }
     })
 
     es.onerror = () => {
-      // Only treat as error if we're still streaming (not just connection close after done)
       setStream(prev => { if (prev) es.close(); return false })
     }
   }, [isStreaming, threadId])
@@ -142,13 +137,22 @@ export default function App() {
       {/* ── Left panel ──────────────────────────────────────────────────── */}
       <div className="panel-left">
 
-        {/* Header */}
+        {/* Brand header */}
         <div className="header">
-          <span className="header-logo">🎬</span>
-          <span className="header-title">Cine<span>AI</span></span>
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div className="header-logo-wrap">
+            <span className="header-icon">🎬</span>
+            <div>
+              <div className="header-title">
+                <span className="t-smart">Smart</span>
+                <span className="t-movie">Movie</span>
+                <span className="t-search">Search</span>
+              </div>
+              <div className="header-tagline">AI-powered movie &amp; TV intelligence</div>
+            </div>
+          </div>
+          <div className="header-right">
             {history.length > 0 && (
-              <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+              <span className="header-turns">
                 {history.length} turn{history.length !== 1 ? 's' : ''}
               </span>
             )}
@@ -157,54 +161,58 @@ export default function App() {
               onClick={startNewConversation}
               title="Start a new conversation"
             >
-              + New Chat
+              + New Search
             </button>
           </div>
         </div>
 
-        {/* Query input */}
+        {/* Search hero */}
         <div className="query-section">
           <div className="query-label">
-            {history.length > 0
-              ? 'Ask a follow-up question'
-              : 'Ask about any movie or TV show'}
+            {history.length > 0 ? 'Follow-up question' : 'Ask about any movie or TV show'}
           </div>
           <form className="query-form" onSubmit={handleSubmit}>
-            <input
-              className="query-input"
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              placeholder={
-                history.length > 0
-                  ? 'e.g. What about the director? Or show me similar films…'
-                  : 'e.g. Show me good bank heist movies'
-              }
-              disabled={isStreaming}
-            />
+            <div className="query-input-wrap">
+              <span className="query-input-icon">🔍</span>
+              <input
+                className="query-input"
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                placeholder={
+                  history.length > 0
+                    ? 'e.g. What about the director? Show me similar films…'
+                    : 'e.g. Best heist movies, or "Tell me about Inception"'
+                }
+                disabled={isStreaming}
+                autoFocus
+              />
+            </div>
             <button className="query-btn" type="submit" disabled={isStreaming || !query.trim()}>
-              {isStreaming ? '…' : 'Ask'}
+              {isStreaming ? '…' : 'Search'}
             </button>
           </form>
+
           {history.length === 0 && (
             <div className="example-queries">
-              {EXAMPLE_QUERIES.map(q => (
+              {EXAMPLE_QUERIES.map(({ icon, text }) => (
                 <button
-                  key={q}
+                  key={text}
                   className="example-chip"
-                  onClick={() => { setQuery(q); runQuery(q) }}
+                  onClick={() => { setQuery(text); runQuery(text) }}
                   disabled={isStreaming}
                 >
-                  {q}
+                  <span>{icon}</span>
+                  {text}
                 </button>
               ))}
             </div>
           )}
         </div>
 
-        {/* Conversation + current answer */}
+        {/* Content area */}
         <div className="answer-section" ref={historyRef}>
 
-          {/* Trending movies (first load only) */}
+          {/* Trending movies — shown on first load */}
           {showTrending && trending.length > 0 && (
             <div>
               <div className="section-label">🔥 Trending This Week</div>
@@ -213,17 +221,24 @@ export default function App() {
                   <div
                     key={m.id}
                     className="movie-card"
-                    style={{ cursor: 'pointer' }}
                     onClick={() => { setQuery(`Tell me about ${m.title}`); runQuery(`Tell me about ${m.title}`) }}
                   >
-                    {m.poster
-                      ? <img src={m.poster} alt={m.title} />
-                      : <div className="movie-card-poster-placeholder">🎬</div>
-                    }
+                    <div className="movie-card-poster-wrap">
+                      {m.poster
+                        ? <img src={m.poster} alt={m.title} />
+                        : <div className="movie-card-poster-placeholder">🎬</div>
+                      }
+                      {m.rating && (
+                        <div className="movie-card-rating-badge">⭐ {m.rating.toFixed(1)}</div>
+                      )}
+                    </div>
                     <div className="movie-card-info">
                       <div className="movie-card-title">{m.title}</div>
-                      <div className="movie-card-meta">{m.year} · {m.media_type}</div>
-                      {m.rating && <div className="movie-card-rating">⭐ {m.rating.toFixed(1)}</div>}
+                      <div className="movie-card-meta">
+                        <span>{m.year}</span>
+                        <span className="movie-card-meta-sep">·</span>
+                        <span className="movie-card-type">{m.media_type}</span>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -231,20 +246,31 @@ export default function App() {
             </div>
           )}
 
+          {/* Empty state when no trending */}
           {showTrending && trending.length === 0 && (
             <div className="answer-placeholder">
-              Ask a question about any movie or TV show.
-              <br />
-              The pipeline routes to TMDB, RAG, or web search automatically.
+              <div className="answer-placeholder-icon">🎬</div>
+              <div className="answer-placeholder-text">
+                Ask anything about movies, TV shows, directors, or genres.
+                <br />
+                The AI pipeline searches TMDB, a knowledge base, and the web simultaneously.
+              </div>
+              <div className="answer-placeholder-hint">Try: "Best heist films with a heist expert's take"</div>
             </div>
           )}
 
-          {/* Previous conversation turns */}
+          {/* Previous turns */}
           {history.map((turn, i) => (
             <div key={i} className="history-turn">
               <div className="history-q">
                 <span className="history-q-icon">You</span>
                 {turn.q}
+              </div>
+              <div className="ai-indicator">
+                <div className="ai-indicator-badge">
+                  <span className="ai-indicator-dot" />
+                  SmartMovieSearch
+                </div>
               </div>
               <div className="history-a answer-content">
                 <ReactMarkdown>{turn.a}</ReactMarkdown>
@@ -258,12 +284,22 @@ export default function App() {
               {history.length > 0 && (
                 <div className="history-q">
                   <span className="history-q-icon">You</span>
-                  {/* last question is the current one */}
                   {query || '…'}
                 </div>
               )}
+              <div className="ai-indicator">
+                <div className="ai-indicator-badge">
+                  <span className={`ai-indicator-dot ${isStreaming ? 'streaming' : ''}`} />
+                  SmartMovieSearch
+                </div>
+              </div>
               <div className="answer-content">
                 <ReactMarkdown>{answer}</ReactMarkdown>
+                {isStreaming && !answer && (
+                  <span style={{ color: 'var(--text-dim)', fontStyle: 'italic', fontSize: 13 }}>
+                    Agents thinking<span className="loading-dots"><span>.</span><span>.</span><span>.</span></span>
+                  </span>
+                )}
                 {isStreaming && <span className="cursor-blink" />}
               </div>
             </div>
@@ -273,21 +309,19 @@ export default function App() {
         </div>
       </div>
 
-      {/* ── Right panel: Observability ────────────────────────────────────── */}
+      {/* ── Right panel: AI Pipeline ────────────────────────────────────────── */}
       <div className="panel-right">
         <div className="obs-header">
-          <span className="obs-title">Pipeline Observability</span>
+          <span className="obs-title">⚡ AI Pipeline</span>
           <span className={`obs-badge ${isStreaming ? 'live' : ''}`}>
             {isStreaming ? 'LIVE' : events.length > 0 ? 'COMPLETE' : 'IDLE'}
           </span>
           {turnNumber > 0 && (
-            <span style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', marginLeft: 4 }}>
+            <span style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
               turn {turnNumber}
             </span>
           )}
-          <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
-            {events.length} events
-          </span>
+          <span className="obs-event-count">{events.length > 0 ? `${events.length} events` : ''}</span>
         </div>
 
         <div className="obs-tabs">

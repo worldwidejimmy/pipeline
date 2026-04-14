@@ -74,15 +74,20 @@ export function PipelineGraph({ events }: Props) {
     )
   }
 
+  const allIdle = Object.values(nodeStates).every(s => s.status === 'idle')
+
   return (
     <div className="pipeline-graph">
+      {allIdle && (
+        <div className="pipeline-idle-hint">Ask a question to watch agents work in real-time</div>
+      )}
       <div className="graph-nodes">
         {renderNode('supervisor_route')}
 
+        <div className="graph-connector">↓</div>
+
         {routing && (
-          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-            → {routing}
-          </div>
+          <div className="graph-routing-label">→ {routing}</div>
         )}
 
         <div className="graph-fan">

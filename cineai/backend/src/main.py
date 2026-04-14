@@ -21,11 +21,16 @@ from fastapi.responses import StreamingResponse
 from src.graph.pipeline import build_pipeline, CineState, _get_memory
 from src.tools import tmdb_client
 
-app = FastAPI(title="CineAI", version="1.1.0")
+app = FastAPI(title="SmartMovieSearch", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5174", "http://127.0.0.1:5174"],
+    allow_origins=[
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+        "https://smartmoviesearch.com",
+        "https://www.smartmoviesearch.com",
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -234,4 +239,4 @@ async def search(q: str = Query(..., min_length=1)):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "service": "cineai-backend", "version": "1.1.0"}
+    return {"status": "ok", "service": "smartmoviesearch-backend", "version": "2.0.0"}
