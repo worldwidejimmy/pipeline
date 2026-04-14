@@ -24,7 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from langchain_community.document_loaders import TextLoader, UnstructuredMarkdownLoader
+from langchain_community.document_loaders import TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from langchain_openai import OpenAIEmbeddings
@@ -37,9 +37,10 @@ from pymilvus import (
 
 from src.config import get_config
 
+# TextLoader handles both plain text and markdown — no heavy unstructured dep needed
 LOADER_MAP = {
     ".txt": TextLoader,
-    ".md":  UnstructuredMarkdownLoader,
+    ".md":  TextLoader,
 }
 
 DEFAULT_CHUNK_SIZE    = 800

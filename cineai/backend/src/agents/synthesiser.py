@@ -57,13 +57,7 @@ async def synthesise_node(state: dict) -> dict:
         sections.append(f"### Web Search\n{state['search_result']}")
 
     if not sections:
-        answer = "No agent produced a result. Please try a different question."
-        new_history = history + [{"q": question, "a": answer}]
-        return {"answer": answer, "history": new_history[-10:]}
-
-    # Single source — skip synthesis overhead
-    if len(sections) == 1:
-        answer = sections[0].split("\n", 1)[-1].strip()
+        answer = "I couldn't find information on that. Please try rephrasing your question."
         new_history = history + [{"q": question, "a": answer}]
         return {"answer": answer, "history": new_history[-10:]}
 
