@@ -165,11 +165,14 @@ async def _stream_pipeline(question: str, thread_id: str) -> AsyncIterator[str]:
         raw = str(exc)
 
         def _sanitize(text: str) -> str:
-            """Strip account/org identifiers from error messages before sending to frontend."""
-            text = _re.sub(r"\borg_[A-Za-z0-9]+\b", "[org-id]", text)
-            text = _re.sub(r"\buser_[A-Za-z0-9]+\b", "[user-id]", text)
-            text = _re.sub(r"\bproj_[A-Za-z0-9]+\b", "[proj-id]", text)
-            return text
+            """Remove account identifiers from error text while keeping actionable info."""
+            # "in organization org_XXXX service tier on_demand" — drop silently
+            text = _re.sub(r"\s+in organization\s+\S+\s+service tier\s+\S+", "", text)
+            # Any remaining bare org_/user_/proj_ tokens
+            text = _re.sub(r"\borg_[A-Za-z0-9]+\b", "", text)
+            text = _re.sub(r"\buser_[A-Za-z0-9]+\b", "", text)
+            text = _re.sub(r"\bproj_[A-Za-z0-9]+\b", "", text)
+            return text.strip()
 
         if "rate_limit_exceeded" in raw or "429" in raw:
             wait = ""
