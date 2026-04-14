@@ -531,3 +531,67 @@ html, body, #root {
 }
 .loading-dots span:nth-child(2) { animation-delay: 0.2s; }
 .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+/* ── New chat button ───────────────────────────────────────────────────────── */
+.new-chat-btn {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 12px;
+  transition: border-color 0.15s, color 0.15s;
+}
+.new-chat-btn:hover { border-color: var(--purple); color: var(--text); }
+
+/* ── Conversation history ──────────────────────────────────────────────────── */
+.history-turn {
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+}
+
+.history-q {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  font-size: 13px;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.history-q-icon {
+  background: var(--purple);
+  border-radius: 4px;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  flex-shrink: 0;
+}
+
+.history-a {
+  opacity: 0.75;
+}
+
+.current-turn {
+  animation: fade-in 0.2s ease;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Section label ─────────────────────────────────────────────────────────── */
+.section-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  margin-bottom: 12px;
+}
