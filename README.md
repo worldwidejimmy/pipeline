@@ -2,15 +2,12 @@
 
 > 🚀 **Live demo:** [smartmoviesearch.com](https://smartmoviesearch.com) — running on the Groq free tier (100k tokens/day), so queries may be unavailable if the daily limit is reached. The ⚙️ status button in the app shows current availability.
 
-A production-minded agentic RAG system built with **LangGraph + Milvus**.
+A production agentic RAG system built with **LangGraph + Milvus**, deployed as [SmartMovieSearch](https://smartmoviesearch.com) — a natural-language movie intelligence platform.
 
 A **Supervisor** agent intelligently routes each user question to the right
-sub-agent — a **RAG agent** that searches your own documents, a **Web Search
-agent** that queries the live web via Tavily, or both — then synthesises the
-results into a single coherent answer.
-
-Built for production deployment on commodity hardware.
-Extends the RAG pattern into full multi-agent orchestration.
+sub-agent — a **RAG agent** that searches a curated knowledge base, a **TMDB agent**
+that queries live movie data, a **Web Search agent** for current news, or any
+combination — then synthesises the results into a single coherent streaming answer.
 
 ---
 
@@ -21,52 +18,54 @@ flowchart TD
     UserQuery[User Query] --> Supervisor
     subgraph langgraph [LangGraph State Machine]
         Supervisor -->|"route: rag"| RAGAgent[RAG Agent]
+        Supervisor -->|"route: tmdb"| TMDBAgent[TMDB Agent]
         Supervisor -->|"route: search"| SearchAgent[Web Search Agent]
-        Supervisor -->|"route: both"| RAGAgent
-        Supervisor -->|"route: both"| SearchAgent
         RAGAgent -->|rag_result| Synthesise[Synthesise]
+        TMDBAgent -->|tmdb_result| Synthesise
         SearchAgent -->|search_result| Synthesise
     end
     RAGAgent --> Milvus[(Milvus\nVector DB)]
+    TMDBAgent --> TMDB[TMDB API]
     SearchAgent --> WebAPI[Tavily API]
-    Synthesise --> FinalAnswer[Final Answer]
+    Synthesise --> FinalAnswer[Streaming Answer]
     LangSmith[LangSmith Tracing] -.->|observes every step| langgraph
 ```
 
-The graph is a compiled **LangGraph `StateGraph`** — stateful, inspectable,
-and easy to extend with new agents or tools.
+The graph is a compiled **LangGraph `StateGraph`** — stateful, multi-turn, and
+deployable via Docker Compose.
 
-**State schema (`PipelineState` TypedDict):**
+**State schema (`CineState` TypedDict):**
 
 | Key | Type | Description |
 |---|---|---|
-| `query` | `str` | User question — set at entry |
-| `route` | `str` | `"rag"` \| `"search"` \| `"both"` |
+| `question` | `str` | User question — set at entry |
+| `routing` | `str` | `"tmdb"` \| `"rag"` \| `"search"` \| combinations |
 | `rag_result` | `str\|None` | Output from the RAG agent |
+| `tmdb_result` | `str\|None` | Output from the TMDB agent |
 | `search_result` | `str\|None` | Output from the web search agent |
-| `final_answer` | `str\|None` | Synthesised final answer |
+| `answer` | `str\|None` | Synthesised final answer |
+| `history` | `list` | Multi-turn conversation memory |
 
 ---
 
 ## Tech Stack
 
-This project's stack:
-
 | Layer | Technology |
 |---|---|
-| Agent orchestration | [LangGraph](https://github.com/langchain-ai/langgraph) 1.1+ |
-| LLM | OpenAI `gpt-4o-mini` or local Ollama |
-| Vector database | [Milvus](https://milvus.io) 2.5+ (Docker) |
-| Embeddings | OpenAI `text-embedding-3-small` or Ollama `nomic-embed-text` |
-| Web search | [Tavily](https://tavily.com) (free tier) |
+| Agent orchestration | [LangGraph](https://github.com/langchain-ai/langgraph) 1.2+ |
+| LLM | [Groq](https://groq.com) `llama-3.3-70b-versatile` |
+| Vector database | [Milvus](https://milvus.io) 2.5+ — hybrid BM25 + dense search |
+| Embeddings | OpenAI `text-embedding-3-small` |
+| Movie data | [TMDB API](https://www.themoviedb.org/documentation/api) |
+| Web search | [Tavily](https://tavily.com) |
+| Backend | FastAPI + Server-Sent Events (SSE) streaming |
+| Frontend | React + TypeScript + Vite |
 | Observability | [LangSmith](https://smith.langchain.com) (optional) |
-| Vector DB UI | [Attu](https://github.com/zilliz/attu) (bundled in Compose) |
+| Deployment | Docker Compose + Nginx + Cloudflare |
 
-### The Broader AI/ML Pipeline Ecosystem (2026)
+### AI/ML Pipeline Ecosystem
 
-Real production pipelines are built by connecting components from each of these layers.
-This project covers orchestration, vector DB, LLM serving, and observability — the four
-key layers in a modern AI platform stack.
+Real production pipelines connect components across these layers:
 
 | Layer | Popular Tools | What it does |
 |---|---|---|
@@ -76,106 +75,43 @@ key layers in a modern AI platform stack.
 | **Observability** | LangSmith, Phoenix, Helicone, LangFuse | Tracing, debugging, monitoring agents |
 | **Data Pipelines** | Airflow, Dagster, Prefect | Heavier batch/ETL orchestration |
 
-> **LangGraph is currently the #1 answer** when asked "how do you build agentic pipelines?" — it sits directly on top of LangChain and gives you stateful, inspectable, production-deployable graphs.
-
 ---
 
 ## Quick Start
 
-### 1. Install Docker (Ubuntu 25.04)
+### 1. Install Docker
 
 ```bash
-sudo apt update
-sudo apt install docker.io docker-compose -y
+sudo apt update && sudo apt install docker.io docker-compose -y
 sudo systemctl enable --now docker
-
-# Add your user to the docker group so you don't need sudo
-sudo usermod -aG docker $USER
-newgrp docker          # apply group change in the current shell
+sudo usermod -aG docker $USER && newgrp docker
 ```
 
-> **Note:** Ubuntu 25.04 ships `docker.io` (28.x) which uses the hyphenated
-> `docker-compose` command, not `docker compose`. All commands below use
-> `docker-compose` accordingly.
-
-### 2. Start Milvus (+ Attu UI)
+### 2. Start the full stack
 
 ```bash
-docker-compose up -d
+cd cineai/
+cp backend/.env.example backend/.env   # fill in your API keys
+docker compose up -d
 ```
 
-Wait ~60 seconds, then verify Milvus is healthy:
+Wait ~30 seconds for Milvus to become healthy, then verify:
 
 ```bash
-curl http://localhost:9091/healthz
-# → {"status":"healthy"}
+curl http://localhost:8001/api/health
+# → {"status":"ok","service":"smartmoviesearch-backend"}
 ```
 
-**Attu** (vector DB web UI) runs on port 5160. Access it via SSH tunnel from
-your local machine — do **not** expose this port publicly:
+### 3. Ingest the knowledge base
 
 ```bash
-# On your local machine:
-ssh -L 5160:localhost:5160 user@your-vps
-# Then open http://localhost:5160 in your browser
+docker compose exec backend python scripts/ingest.py docs/
+# → ✓ Inserted 168 chunks (hybrid BM25 + dense collection)
 ```
 
-### 3. Python environment
+### 4. Open the app
 
-Ubuntu 25.04 needs the venv package installed separately:
-
-```bash
-sudo apt install python3.13-venv -y
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-### 3. Configure environment variables
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` and at minimum set:
-
-```dotenv
-OPENAI_API_KEY=sk-...       # or set LLM_PROVIDER=ollama
-TAVILY_API_KEY=tvly-...     # free at https://app.tavily.com
-```
-
-Optional but recommended for the demo — add LangSmith keys to get a full
-trace of every agent step:
-
-```dotenv
-LANGCHAIN_TRACING_V2=true
-LANGCHAIN_API_KEY=ls__...
-LANGCHAIN_PROJECT=research-pipeline
-```
-
-### 4. Ingest your documents
-
-Put `.txt`, `.md`, or `.pdf` files in a `docs/` folder, then:
-
-```bash
-python scripts/ingest.py docs/
-# → ✓ Inserted 42 chunks in 3.2s.
-```
-
-### 5. Ask a question
-
-```bash
-python scripts/query.py "What is LangGraph and how does it differ from LangChain?"
-```
-
-Interactive mode (REPL):
-
-```bash
-python scripts/query.py
-# > What is LangGraph?
-# > Latest news about Milvus 2.6?
-# Ctrl+C to exit
-```
+Navigate to [http://localhost:5174](http://localhost:5174).
 
 ---
 
@@ -183,259 +119,142 @@ python scripts/query.py
 
 ```
 pipeline/
-├── docker-compose.yml          Milvus + etcd + MinIO + Attu
-├── requirements.txt
-├── .env.example
 │
-├── src/
-│   ├── config.py               Central config (reads .env)
-│   ├── agents/
-│   │   ├── supervisor.py       Routing + synthesis nodes
-│   │   ├── rag_agent.py        Milvus RAG node
-│   │   └── search_agent.py     Tavily web search node
-│   ├── tools/
-│   │   ├── milvus_retriever.py Vector store wrapper + Tool
-│   │   └── web_search.py       Tavily wrapper + Tool
-│   ├── graph/
-│   │   └── pipeline.py         LangGraph StateGraph (compiled)
-│   └── ingest/
-│       └── loader.py           Load → chunk → embed → Milvus
+├── cineai/                         SmartMovieSearch application
+│   ├── docker-compose.yml          Full stack (Milvus + backend + frontend + Attu)
+│   ├── nginx.conf                  Production nginx config
+│   │
+│   ├── backend/
+│   │   ├── src/
+│   │   │   ├── main.py             FastAPI app — SSE streaming, /api/status, /api/knowledge
+│   │   │   ├── config.py           Centralised config (reads .env)
+│   │   │   ├── agents/
+│   │   │   │   ├── supervisor.py   Routing node — classifies query to agent(s)
+│   │   │   │   ├── rag_agent.py    Hybrid Milvus retrieval (BM25 + dense, RRF fusion)
+│   │   │   │   ├── tmdb_agent.py   TMDB search, discovery, filmography comparison
+│   │   │   │   ├── search_agent.py Tavily web search
+│   │   │   │   └── synthesiser.py  Merges agent outputs → streaming final answer
+│   │   │   ├── graph/
+│   │   │   │   └── pipeline.py     LangGraph StateGraph (compiled, multi-turn)
+│   │   │   └── tools/
+│   │   │       ├── milvus_retriever.py  Hybrid search wrapper
+│   │   │       └── tmdb_client.py       TMDB API client
+│   │   ├── docs/                   RAG knowledge base (markdown)
+│   │   └── scripts/
+│   │       └── ingest.py           Document ingestion CLI
+│   │
+│   └── frontend/
+│       └── src/
+│           ├── App.tsx             Main app — SSE client, streaming answer, panels
+│           └── components/
+│               ├── StatusModal.tsx  Live service health + API key status
+│               ├── KnowledgeModal.tsx  Browse RAG knowledge base
+│               ├── PipelineGraph.tsx   Real-time agent routing visualisation
+│               ├── AgentTimeline.tsx   Per-agent latency breakdown
+│               └── EventLog.tsx        Full SSE event stream
 │
-├── scripts/
-│   ├── ingest.py               CLI for document ingestion
-│   └── query.py                CLI for querying the pipeline
-│
-└── docs/                       Drop your .txt / .md / .pdf files here
+└── src/                            Original base pipeline (CLI)
+    ├── agents/                     Supervisor, RAG, search agents
+    ├── graph/pipeline.py           Core LangGraph StateGraph
+    └── tools/                      Milvus + Tavily wrappers
 ```
 
 ---
 
 ## How It Works
 
-### 1. Routing (Supervisor → route node)
+### 1. Routing (Supervisor)
 
-The supervisor asks the LLM one question: *should this go to `rag`, `search`,
-or `both`?* It expects a single-word answer, which makes the parsing
-deterministic and cheap.
+The supervisor classifies each question into a routing decision using a single
+cheap LLM call. The result deterministically selects which agents run:
 
 ```python
 # src/agents/supervisor.py
-decision = llm.invoke([
+decision = await llm.ainvoke([
     SystemMessage(content=ROUTE_SYSTEM_PROMPT),
-    HumanMessage(content=query),
-]).content.strip().lower()
-# → "rag" | "search" | "both"
+    HumanMessage(content=question),
+])
+# → "tmdb" | "rag" | "search" | "tmdb+rag" | "all" | …
 ```
 
-### 2. Fan-out (conditional edges)
+### 2. Parallel fan-out
 
-LangGraph's `add_conditional_edges` returns a list of node names — when the
-route is `"both"`, the graph fans out to `rag_agent` and `search_agent` in
-parallel:
+When the route includes multiple agents, LangGraph's `add_conditional_edges`
+fans out to all of them simultaneously:
 
 ```python
 # src/graph/pipeline.py
 def dispatch(state) -> list[str]:
-    if state["route"] == "rag":
-        return ["rag_agent"]
-    if state["route"] == "search":
-        return ["search_agent"]
-    return ["rag_agent", "search_agent"]   # parallel execution
+    routing = state["routing"]
+    agents = []
+    if "tmdb"   in routing: agents.append("tmdb_agent")
+    if "rag"    in routing: agents.append("rag_agent")
+    if "search" in routing: agents.append("search_agent")
+    return agents or ["rag_agent"]
 ```
 
-### 3. RAG Agent
+### 3. Hybrid RAG (BM25 + Dense)
 
-Calls `pymilvus` through `langchain-milvus`, retrieves the top-k most
-semantically similar chunks, then prompts the LLM to answer strictly from
-those chunks with citations.
+The RAG agent uses Milvus 2.5's native sparse vector support to run BM25 and
+dense retrieval simultaneously, then fuses results via RRF (Reciprocal Rank
+Fusion):
 
-### 4. Search Agent
-
-Calls the Tavily API, which returns clean AI-friendly search results (not raw
-HTML). The LLM synthesises a cited answer from those results.
-
-### 5. Synthesis (Supervisor → synthesise node)
-
-Both sub-agent results land in `state["rag_result"]` and
-`state["search_result"]`. The supervisor's second node merges them into a
-single, de-duplicated final answer.
-
----
-
-## Extending the Pipeline
-
-### Add a new agent
-
-1. Create `src/agents/my_agent.py` with a `run_my_agent(state: dict) -> dict` function
-2. Register it in `src/graph/pipeline.py`:
-   ```python
-   graph.add_node("my_agent", run_my_agent)
-   graph.add_edge("my_agent", "synthesise")
-   ```
-3. Add `"my_agent"` as a possible return value in `dispatch()`
-4. Update the supervisor's routing prompt to know about the new agent
-
-### Switch to Ollama (fully local, no API keys)
-
-```dotenv
-LLM_PROVIDER=ollama
-OLLAMA_MODEL=llama3.2
-EMBEDDING_PROVIDER=ollama
-EMBEDDING_MODEL=nomic-embed-text
+```python
+sparse_req  = AnnSearchRequest(query_sparse, "sparse_vector", {"drop_ratio_search": 0.2}, top_k)
+dense_req   = AnnSearchRequest(query_dense,  "dense_vector",  {"metric_type": "IP"}, top_k)
+results     = client.hybrid_search([sparse_req, dense_req], RRFRanker(k=60))
 ```
 
-Pull the models first:
-```bash
-ollama pull llama3.2
-ollama pull nomic-embed-text
+### 4. SSE streaming
+
+The FastAPI backend streams structured events over SSE — routing decisions,
+agent starts/ends, LLM tokens, retrieved chunks, usage stats — so the frontend
+can render the pipeline in real time:
+
 ```
+pipeline_start → routing_decision → agent_start →
+  llm_start → token (×N) → llm_end →
+  chunks_retrieved / tmdb_results →
+agent_end → done
+```
+
+### 5. Synthesis
+
+All agent results land in state. The synthesiser always invokes the LLM
+(never short-circuits), ensuring token streaming reaches the frontend for
+every query.
 
 ---
 
 ## Observability with LangSmith
 
-When `LANGCHAIN_TRACING_V2=true` is set, every graph execution is
-automatically traced. In the LangSmith UI you can see:
+When `LANGCHAIN_TRACING_V2=true`, every graph execution is automatically
+traced — no instrumentation code required. The LangSmith UI shows:
 
 - Which agent was routed to and why
-- The exact prompts and completions at each node
+- Exact prompts and completions at each node
 - Token usage and latency per step
-- The full state at every edge transition
-
-This demonstrates production-minded thinking about debugging and reliability — it
-demonstrates production-minded thinking about debugging and reliability.
+- Full state at every edge transition
 
 ---
 
-## VPS Deployment (Ubuntu 25.04)
+## API Reference
 
-The prior conversation got Docker installed on the VPS (`docker.io` 28.2.2).
-To run the full stack there:
-
-```bash
-# 1. Copy the project to the VPS
-scp -r . user@your-vps:~/pipeline
-
-# 2. SSH in (with port forward for Attu UI)
-ssh -L 5160:localhost:5160 user@your-vps
-
-# 3. Install Docker if not present (Ubuntu 25.04)
-sudo apt update && sudo apt install docker.io docker-compose python3.13-venv -y
-sudo systemctl enable --now docker
-sudo usermod -aG docker $USER && newgrp docker
-
-# 4. Start Milvus
-cd ~/pipeline
-docker-compose up -d
-
-# 5. Set up Python env
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env && nano .env
-
-# 6. Ingest and query
-python scripts/ingest.py docs/
-python scripts/query.py
-```
-
----
-
-## Technical Highlights
-
-> "I built a multi-agent research system using LangGraph and Milvus that I can
-> deploy locally or on a VPS with Docker Compose."
-
-Key things you can speak to:
-
-- **Agent orchestration**: LangGraph `StateGraph` with typed state, parallel
-  fan-out via `add_conditional_edges`, and a dedicated synthesis step
-- **Vector database**: Milvus for storing embeddings; `langchain-milvus` for
-  the integration layer; chunking strategy (800 chars, 100 overlap)
-- **RAG pipeline**: document ingestion → chunking → embedding → similarity
-  search → grounded generation with citations
-- **Tool calling**: each sub-agent is a named `Tool` the supervisor can
-  invoke; the architecture is the same pattern used in production at most
-  AI companies today
-- **Observability**: LangSmith traces every step — prompts, completions,
-  token counts, latency — without a single line of instrumentation code
-- **Reliability**: graceful degradation (search falls back cleanly when
-  `TAVILY_API_KEY` is missing), deterministic routing via single-word LLM
-  output, typed state schema prevents silent data bugs
-- **Extensibility**: adding a new agent is four lines of code in `pipeline.py`
-  plus a routing update
-
----
-
-## Next Steps (after first working query)
-
-Once you have a query returning an answer, work through these in order — each
-one adds a meaningful capability to the system.
-
-### 1. LangSmith traces (15 min)
-
-Sign up at [smith.langchain.com](https://smith.langchain.com) (free, no credit
-card). Create a Personal Access Token, then add to `.env`:
-
-```dotenv
-LANGCHAIN_TRACING_V2=true
-LANGCHAIN_API_KEY=ls__...
-LANGCHAIN_PROJECT=research-pipeline
-```
-
-No code changes needed. Run a query — the trace appears in the LangSmith
-dashboard within seconds. You can show the routing decision, each agent's
-prompt/completion, token counts, and latency per step.
-
-### 2. Ingest more interesting docs
-
-The more relevant your docs, the more impressive the RAG route looks:
-
-```bash
-# LangGraph docs
-curl -sL https://raw.githubusercontent.com/langchain-ai/langgraph/main/README.md \
-  -o docs/langgraph-readme.md
-
-# Milvus docs overview
-curl -sL https://raw.githubusercontent.com/milvus-io/milvus/master/README.md \
-  -o docs/milvus-readme.md
-
-python scripts/ingest.py docs/
-```
-
-### 3. Demo queries that show off routing
-
-```bash
-# Forces RAG (answer is in your ingested docs)
-python scripts/query.py "What are the main components of LangGraph?" -v
-
-# Forces web search (time-sensitive)
-python scripts/query.py "What is the latest stable release of Milvus?" -v
-
-# Forces both — the money shot
-python scripts/query.py "How does LangGraph compare to alternatives and what's new in it?" -v
-```
-
-Watch the `Routed to:` line — this shows the routing decision in action.
-
-### 4. Browse embeddings in Attu
-
-Open [http://localhost:5160](http://localhost:5160) (via SSH tunnel), connect
-to `localhost:19530`, and explore the `research_docs` collection. You can see
-vector counts, schema, and run similarity searches visually.
+| Endpoint | Description |
+|---|---|
+| `GET /api/query?q=<question>&thread_id=<id>` | SSE stream — pipeline events + streaming answer |
+| `GET /api/status` | Live health: Groq / Milvus / TMDB + API key presence |
+| `GET /api/knowledge` | RAG knowledge base summary (sources + chunk counts) |
+| `GET /api/trending` | Trending movies from TMDB |
+| `GET /api/history?thread_id=<id>` | Conversation history for a thread |
+| `GET /api/health` | Health check |
 
 ---
 
 ## Roadmap
 
-- [ ] **Memory** — LangGraph checkpointers (SQLite or Redis) so the pipeline
-      remembers previous queries in a session
-- [ ] **Streaming** — `pipeline.astream()` so answers print token-by-token
-      instead of all at once
-- [ ] **FastAPI wrapper** — expose the pipeline as a REST endpoint so it's
-      callable from any client
-- [ ] **Hybrid search** — combine dense vector search with sparse BM25 in
-      Milvus for better retrieval on exact-match queries
-- [ ] **Full Docker stack** — Dockerfile for the Python app so the whole
-      system (Milvus + app) starts with one `docker-compose up`
-- [ ] **Evaluation** — add a test set of questions with expected answers and
-      measure RAG retrieval quality (recall@k)
+- [ ] **RAGAS evaluation** — automated retrieval quality metrics (Faithfulness, Answer Relevancy, Context Precision) against a curated test set
+- [ ] **Redis semantic cache** — skip the LLM for repeated or near-identical queries
+- [ ] **Streaming tokens in Event Log** — surface token stream in the observability panel alongside the answer
+- [ ] **User-provided documents** — API endpoint to ingest uploaded files into a per-session collection
+- [ ] **Multi-modal** — poster image embeddings alongside text for visual similarity search
