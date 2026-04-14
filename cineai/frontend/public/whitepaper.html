@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SmartMovieSearch — Technical White Paper</title>
+  <meta name="description" content="How SmartMovieSearch works: a production multi-agent AI system for real-time movie intelligence." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:          #06060e;
+      --surface:     #0e0e1c;
+      --surface2:    #14142a;
+      --border:      #20203a;
+      --border-lit:  #2e2e52;
+      --text:        #eaeaf8;
+      --text-muted:  #7a7aae;
+      --text-dim:    #3a3a60;
+      --amber:       #f59e0b;
+      --amber-light: #fbbf24;
+      --indigo:      #6366f1;
+      --indigo-light:#818cf8;
+      --green:       #22c55e;
+      --font-sans:   'Inter', system-ui, sans-serif;
+      --font-mono:   'JetBrains Mono', monospace;
+      --radius:      8px;
+      --radius-lg:   14px;
+      --max-w:       780px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-sans);
+      font-size: 15px;
+      line-height: 1.75;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Top bar ──────────────────────────────────────────────────────── */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(6,6,14,0.88);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 32px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      height: 52px;
+    }
+    .topbar-logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      text-decoration: none;
+    }
+    .topbar-logo-icon { font-size: 20px; }
+    .topbar-logo-name {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+    .topbar-logo-name .t-smart  { color: var(--amber); }
+    .topbar-logo-name .t-movie  { color: var(--text); }
+    .topbar-logo-name .t-search { color: var(--indigo-light); }
+    .topbar-sep {
+      flex: 1;
+    }
+    .topbar-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .topbar-back {
+      font-size: 12px;
+      color: var(--text-muted);
+      text-decoration: none;
+      padding: 5px 12px;
+      border: 1px solid var(--border-lit);
+      border-radius: var(--radius);
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .topbar-back:hover { color: var(--amber); border-color: var(--amber); }
+
+    /* ── Hero ─────────────────────────────────────────────────────────── */
+    .hero {
+      background:
+        radial-gradient(ellipse 80% 60% at 50% -10%, rgba(99,102,241,0.08) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 80% 110%, rgba(245,158,11,0.06) 0%, transparent 60%),
+        var(--bg);
+      border-bottom: 1px solid var(--border);
+      padding: 64px 32px 52px;
+      text-align: center;
+    }
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--indigo-light);
+      border: 1px solid rgba(99,102,241,0.3);
+      background: rgba(99,102,241,0.08);
+      padding: 4px 12px;
+      border-radius: 20px;
+      margin-bottom: 24px;
+    }
+    .hero h1 {
+      font-size: clamp(26px, 4vw, 38px);
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.15;
+      margin-bottom: 16px;
+      color: var(--text);
+    }
+    .hero h1 .accent { color: var(--amber); }
+    .hero-sub {
+      font-size: 16px;
+      color: var(--text-muted);
+      max-width: 560px;
+      margin: 0 auto 28px;
+    }
+    .hero-meta {
+      display: flex;
+      justify-content: center;
+      gap: 20px;
+      flex-wrap: wrap;
+      font-size: 12px;
+      color: var(--text-dim);
+      font-family: var(--font-mono);
+    }
+    .hero-meta a {
+      color: var(--text-dim);
+      text-decoration: none;
+      transition: color 0.15s;
+    }
+    .hero-meta a:hover { color: var(--amber); }
+
+    /* ── Main content ─────────────────────────────────────────────────── */
+    .content {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 56px 32px 80px;
+    }
+
+    /* ── Section headings ─────────────────────────────────────────────── */
+    h2 {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--text);
+      margin: 52px 0 18px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    h2:first-of-type { margin-top: 0; }
+    h2 .h2-num {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--indigo);
+      font-family: var(--font-mono);
+      background: rgba(99,102,241,0.12);
+      padding: 2px 8px;
+      border-radius: 4px;
+      letter-spacing: 0.04em;
+    }
+    h3 {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--amber-light);
+      margin: 28px 0 10px;
+      letter-spacing: -0.01em;
+    }
+
+    p { margin-bottom: 14px; color: var(--text-muted); }
+    p strong { color: var(--text); font-weight: 600; }
+
+    /* ── Pull quote ───────────────────────────────────────────────────── */
+    .pull-quote {
+      border-left: 3px solid var(--amber);
+      padding: 14px 20px;
+      background: rgba(245,158,11,0.05);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      margin: 24px 0;
+      font-size: 15px;
+      font-style: italic;
+      color: var(--text);
+    }
+    .pull-quote em { font-style: normal; color: var(--amber-light); }
+
+    /* ── Architecture diagram ─────────────────────────────────────────── */
+    .arch-diagram {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 28px 32px;
+      margin: 24px 0;
+      overflow-x: auto;
+    }
+    .arch-diagram pre {
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      line-height: 1.7;
+      color: var(--text-muted);
+      white-space: pre;
+    }
+    .arch-diagram pre .hl   { color: var(--amber); }
+    .arch-diagram pre .hl2  { color: var(--indigo-light); }
+    .arch-diagram pre .hl3  { color: var(--green); }
+
+    /* ── Step walkthrough ─────────────────────────────────────────────── */
+    .steps {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin: 20px 0;
+    }
+    .step {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+    }
+    .step-num {
+      flex-shrink: 0;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--indigo);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 2px;
+    }
+    .step-body { flex: 1; }
+    .step-body strong { color: var(--text); }
+    .step-body p { margin: 0; font-size: 14px; }
+
+    /* ── Tech pill grid ───────────────────────────────────────────────── */
+    .tech-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 14px;
+      margin: 20px 0;
+    }
+    .tech-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 18px 20px;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .tech-card:hover {
+      border-color: var(--indigo);
+      background: rgba(99,102,241,0.05);
+    }
+    .tech-card-label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--indigo-light);
+      margin-bottom: 6px;
+      font-family: var(--font-mono);
+    }
+    .tech-card-name {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 6px;
+    }
+    .tech-card-desc {
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    /* ── Table ────────────────────────────────────────────────────────── */
+    .wp-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 20px 0;
+      font-size: 13px;
+    }
+    .wp-table th {
+      text-align: left;
+      padding: 10px 14px;
+      background: var(--surface2);
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      border-bottom: 1px solid var(--border);
+    }
+    .wp-table td {
+      padding: 11px 14px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+      color: var(--text-muted);
+    }
+    .wp-table td:first-child {
+      color: var(--amber-light);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    .wp-table tr:last-child td { border-bottom: none; }
+    .wp-table tr:hover td { background: rgba(255,255,255,0.02); }
+
+    /* ── Highlight boxes ──────────────────────────────────────────────── */
+    .info-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--indigo);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      margin: 20px 0;
+      font-size: 13.5px;
+      color: var(--text-muted);
+    }
+    .info-box strong { color: var(--text); }
+
+    /* ── Innovation list ──────────────────────────────────────────────── */
+    .innovation-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin: 16px 0;
+    }
+    .innovation-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 14px 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 13.5px;
+    }
+    .innovation-item:hover { border-color: var(--border-lit); }
+    .innovation-icon { font-size: 18px; flex-shrink: 0; }
+    .innovation-body strong { color: var(--text); display: block; margin-bottom: 2px; font-size: 13px; }
+    .innovation-body span { color: var(--text-muted); font-size: 13px; }
+
+    /* ── Footer ───────────────────────────────────────────────────────── */
+    .footer {
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      padding: 32px;
+      text-align: center;
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+    .footer a { color: var(--text-muted); text-decoration: none; }
+    .footer a:hover { color: var(--amber); }
+
+    /* ── Print ────────────────────────────────────────────────────────── */
+    @media print {
+      .topbar, .topbar-back { display: none; }
+      body { background: #fff; color: #111; }
+      .hero { background: #fff; }
+      h2, h3, p, .wp-table td { color: #111; }
+      .arch-diagram { background: #f5f5f5; }
+    }
+
+    @media (max-width: 600px) {
+      .content { padding: 32px 20px 60px; }
+      .hero { padding: 40px 20px 36px; }
+      .topbar { padding: 0 20px; }
+      .tech-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Top bar -->
+<nav class="topbar">
+  <a class="topbar-logo" href="/">
+    <span class="topbar-logo-icon">🎬</span>
+    <span class="topbar-logo-name">
+      <span class="t-smart">Smart</span><span class="t-movie">Movie</span><span class="t-search">Search</span>
+    </span>
+  </a>
+  <span class="topbar-sep"></span>
+  <span class="topbar-label">Technical White Paper</span>
+  <a class="topbar-back" href="/">← Back to app</a>
+</nav>
+
+<!-- Hero -->
+<div class="hero">
+  <div class="hero-badge">⚙️ Technical Overview</div>
+  <h1>How <span class="accent">SmartMovieSearch</span> works</h1>
+  <p class="hero-sub">A production multi-agent AI system combining real-time movie data, vector search, and web retrieval into a single streaming answer.</p>
+  <div class="hero-meta">
+    <span>smartmoviesearch.com</span>
+    <span>·</span>
+    <a href="https://github.com/worldwidejimmy/pipeline" target="_blank">github.com/worldwidejimmy/pipeline</a>
+    <span>·</span>
+    <span>LangGraph · Milvus · Groq · React</span>
+  </div>
+</div>
+
+<!-- Content -->
+<div class="content">
+
+  <!-- 1. The Problem -->
+  <h2><span class="h2-num">01</span> The Problem</h2>
+
+  <div class="pull-quote">
+    Ask a movie database <em>"Show me good bank heist movies"</em> and it returns nothing — heist is a theme, not a genre tag. Ask it <em>"Is Project Hail Mary Ryan Gosling's best work?"</em> and it has no way to answer. These questions require reasoning, not filtering.
+  </div>
+
+  <p>Movie databases like TMDB are exhaustive but rigid. They expose genre filters, release years, and ratings — but they cannot interpret themes, compare filmographies, or synthesise critical perspective. A single LLM call lacks live data. A single API lacks semantic understanding. The only viable solution is <strong>decomposition</strong>: multiple specialised agents working in parallel, coordinated by an orchestrator.</p>
+
+  <!-- 2. Architecture -->
+  <h2><span class="h2-num">02</span> System Architecture</h2>
+
+  <div class="arch-diagram">
+    <pre>
+<span class="hl">User (browser)</span>
+    │  HTTPS — Cloudflare CDN + SSL termination
+    │
+<span class="hl2">Nginx</span>  (reverse proxy, OVH VPS)
+    ├── /         → React frontend  (static, port 5174)
+    └── /api/*    → FastAPI backend (uvicorn,  port 8001)
+                      │
+                      │  Server-Sent Events stream
+                      │
+              <span class="hl2">LangGraph StateGraph</span>
+                      │
+          ┌───────────┴────────────┐
+          │    <span class="hl">supervisor_route</span>    │  ← decides which agents to invoke
+          └──┬──────────┬──────┬───┘
+             │          │      │     (parallel fan-out)
+       <span class="hl">tmdb_agent</span>   <span class="hl">rag_agent</span>   <span class="hl">search_agent</span>
+       TMDB API      Milvus      Tavily Web
+       (httpx)       :19530      API
+             │          │      │
+          └──┴──────────┴──────┴───┘
+                      │
+               <span class="hl3">synthesise</span>          ← merges results, streams answer
+                      │
+             SSE → browser (token by token)</pre>
+  </div>
+
+  <p>Each layer has a single, clear responsibility. The supervisor decides routing. Agents specialise. The synthesiser integrates. The SSE stream makes the entire process visible to the user in real time.</p>
+
+  <!-- 3. Core Technologies -->
+  <h2><span class="h2-num">03</span> Core Technologies</h2>
+
+  <h3>LangGraph — Multi-Agent Orchestration</h3>
+  <p>LangGraph models the AI pipeline as a directed graph. Each <strong>node</strong> is an async Python function (an agent); each <strong>edge</strong> is conditional routing logic. A shared <code style="font-family:var(--font-mono);font-size:13px;color:var(--amber)">StateGraph</code> object carries conversation state between nodes, and <code style="font-family:var(--font-mono);font-size:13px;color:var(--amber)">MemorySaver</code> checkpoints that state to disk so multi-turn conversation context persists across queries on the same thread.</p>
+  <div class="info-box"><strong>Why not a single LLM call?</strong> A prompt cannot simultaneously call a live API, query a vector database, and do a web search. Agents decompose the problem so each specialist uses the right tool — and they run in parallel, not sequentially.</div>
+
+  <h3>Milvus — Hybrid Vector Search</h3>
+  <p>Milvus stores the movie knowledge corpus (critical essays, directorial analyses, genre guides). The RAG agent retrieves relevant passages using <strong>hybrid search</strong>: a fusion of two complementary retrieval methods ranked by Reciprocal Rank Fusion (RRF).</p>
+  <div class="tech-grid">
+    <div class="tech-card">
+      <div class="tech-card-label">Dense</div>
+      <div class="tech-card-name">Embedding search</div>
+      <div class="tech-card-desc">OpenAI text-embedding-3-small converts text to 1536-dim vectors. Finds semantically similar content even when exact words differ.</div>
+    </div>
+    <div class="tech-card">
+      <div class="tech-card-label">Sparse</div>
+      <div class="tech-card-name">BM25 keyword search</div>
+      <div class="tech-card-desc">Exact keyword matching — critical for proper nouns, film titles, and director names that embeddings can miss.</div>
+    </div>
+    <div class="tech-card">
+      <div class="tech-card-label">Fusion</div>
+      <div class="tech-card-name">RRF ranking</div>
+      <div class="tech-card-desc">Reciprocal Rank Fusion merges both ranked lists into one. Gets the precision of BM25 and the recall of embeddings simultaneously.</div>
+    </div>
+  </div>
+
+  <h3>Groq — Fast LLM Inference</h3>
+  <p>Groq runs <code style="font-family:var(--font-mono);font-size:13px;color:var(--amber)">llama-3.3-70b-versatile</code> on custom LPU (Language Processing Unit) hardware, delivering roughly <strong>10× the token throughput</strong> of comparable GPU cloud providers at a fraction of the cost. In a streaming UI where users watch tokens appear in real time, inference latency is the user experience — this choice is why the first tokens arrive within ~1 second.</p>
+
+  <h3>FastAPI + Server-Sent Events</h3>
+  <p>The backend exposes a single streaming endpoint. It runs the LangGraph pipeline with <code style="font-family:var(--font-mono);font-size:13px;color:var(--amber)">astream_events()</code> and translates internal events — agent lifecycle, LLM tokens, retrieved chunks, TMDB results — into a typed SSE stream consumed by the browser.</p>
+  <div class="info-box"><strong>Why SSE over WebSockets?</strong> SSE is unidirectional (server → client), matching this use case exactly. It works through Cloudflare without configuration, and <code style="font-family:var(--font-mono);font-size:13px">EventSource</code> in the browser auto-reconnects on drop. WebSockets add bidirectional protocol overhead that is unnecessary here.</div>
+
+  <h3>React + TypeScript Frontend</h3>
+  <p>The frontend is a Vite SPA that maintains a live <code style="font-family:var(--font-mono);font-size:13px;color:var(--amber)">EventSource</code> connection per query. It renders the pipeline in real time across four tabs: an animated <strong>pipeline graph</strong> (node status), a <strong>Gantt timeline</strong> (agent latency), a <strong>typed event log</strong>, and a <strong>context panel</strong> (retrieved chunks and TMDB cards). The AI process is visible, not a black box.</p>
+
+  <!-- 4. A query, step by step -->
+  <h2><span class="h2-num">04</span> A Query, Step by Step</h2>
+  <p style="margin-bottom:20px">Tracing <em>"Show me good bank heist movies"</em> through the full stack:</p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body"><p><strong>Supervisor</strong> receives the question, calls Groq to classify intent → routes to all three agents in parallel: <code style="font-family:var(--font-mono);font-size:12px;color:var(--amber)">tmdb + rag + search</code></p></div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body"><p><strong>TMDB agent</strong> calls Groq to extract intent (discover, genre: Crime/Thriller) → queries TMDB API → calls Groq to write a grounded answer citing specific films with ratings</p></div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body"><p><strong>RAG agent</strong> embeds the query with OpenAI → runs hybrid BM25+dense search in Milvus → retrieves heist film corpus chunks → calls Groq to synthesise a knowledge-based answer</p></div>
+    </div>
+    <div class="step">
+      <div class="step-num">4</div>
+      <div class="step-body"><p><strong>Search agent</strong> sends the query to Tavily → retrieves current web results → calls Groq to ground the answer in recent criticism and best-of lists</p></div>
+    </div>
+    <div class="step">
+      <div class="step-num">5</div>
+      <div class="step-body"><p><strong>Synthesiser</strong> receives all three outputs, calls Groq to merge them into a single coherent answer — deduplicating overlapping film mentions and attributing sources</p></div>
+    </div>
+    <div class="step">
+      <div class="step-num">6</div>
+      <div class="step-body"><p><strong>SSE stream</strong> delivers typed events to the browser as they occur: <code style="font-family:var(--font-mono);font-size:12px;color:var(--indigo-light)">pipeline_start → routing_decision → agent_start → token (×N) → tmdb_results → chunks_retrieved → agent_end → done</code></p></div>
+    </div>
+  </div>
+
+  <div class="info-box">Total latency: typically <strong>3–6 seconds</strong>. First tokens appear within ~1 second of submitting. The parallel agent fan-out means all three agents run concurrently — if they ran sequentially it would take 3× as long.</div>
+
+  <!-- 5. Technical Highlights -->
+  <h2><span class="h2-num">05</span> Technical Highlights</h2>
+
+  <div class="innovation-list">
+    <div class="innovation-item">
+      <div class="innovation-icon">🔀</div>
+      <div class="innovation-body">
+        <strong>Hybrid retrieval (BM25 + dense, RRF fusion)</strong>
+        <span>Outperforms either method alone. BM25 catches exact name matches; embeddings catch semantic similarity. RRF merges both ranked lists without needing a learned combiner.</span>
+      </div>
+    </div>
+    <div class="innovation-item">
+      <div class="innovation-icon">⚡</div>
+      <div class="innovation-body">
+        <strong>Parallel agent execution</strong>
+        <span>TMDB, RAG, and web search run concurrently via <code style="font-family:var(--font-mono);font-size:12px">asyncio.gather</code>. Each agent also parallelises its own internal fetches — movie details and actor filmography are fetched simultaneously.</span>
+      </div>
+    </div>
+    <div class="innovation-item">
+      <div class="innovation-icon">🧠</div>
+      <div class="innovation-body">
+        <strong>Multi-turn conversation memory</strong>
+        <span>LangGraph's <code style="font-family:var(--font-mono);font-size:12px">MemorySaver</code> + <code style="font-family:var(--font-mono);font-size:12px">thread_id</code> gives the supervisor history across turns. "What about his other films?" works correctly without re-stating context.</span>
+      </div>
+    </div>
+    <div class="innovation-item">
+      <div class="innovation-icon">🔭</div>
+      <div class="innovation-body">
+        <strong>Observable pipeline</strong>
+        <span>Every internal event — agent start/end, LLM call, retrieved chunks, routing decision — streams to the UI. The AI reasoning process is transparent, not a black box with a spinner.</span>
+      </div>
+    </div>
+    <div class="innovation-item">
+      <div class="innovation-icon">🎬</div>
+      <div class="innovation-body">
+        <strong>Filmography comparison intent</strong>
+        <span>A <code style="font-family:var(--font-mono);font-size:12px">movie_and_person</code> intent type fetches movie detail and actor filmography in parallel, sorts by rating, and hands the ranked list to the synthesis LLM — turning "is this their best film?" from a non-answer into a precise ranked response.</span>
+      </div>
+    </div>
+    <div class="innovation-item">
+      <div class="innovation-icon">🚀</div>
+      <div class="innovation-body">
+        <strong>Production deployment</strong>
+        <span>Full Docker Compose stack on OVH VPS: Milvus + etcd + MinIO + FastAPI + React. Nginx reverse proxy. Cloudflare for SSL, CDN, and DDoS protection. Live at smartmoviesearch.com.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 6. Stack Summary -->
+  <h2><span class="h2-num">06</span> Full Stack Summary</h2>
+
+  <table class="wp-table">
+    <thead>
+      <tr>
+        <th>Layer</th>
+        <th>Technology</th>
+        <th>Role</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>Orchestration</td><td>LangGraph 1.1</td><td>Multi-agent state machine with conditional routing and conversation memory</td></tr>
+      <tr><td>LLM inference</td><td>Groq (llama-3.3-70b)</td><td>All reasoning: routing decisions, intent extraction, answer generation</td></tr>
+      <tr><td>Vector DB</td><td>Milvus 2.5</td><td>Hybrid BM25 + dense search over the movie knowledge corpus</td></tr>
+      <tr><td>Embeddings</td><td>OpenAI text-embedding-3-small</td><td>1536-dim dense vectors for semantic retrieval</td></tr>
+      <tr><td>Movie data</td><td>TMDB API</td><td>Real-time film/TV metadata, cast, ratings, trending, person filmography</td></tr>
+      <tr><td>Web search</td><td>Tavily API</td><td>Current web results as a third retrieval source</td></tr>
+      <tr><td>Backend</td><td>FastAPI + uvicorn</td><td>Async SSE streaming, typed event protocol</td></tr>
+      <tr><td>Frontend</td><td>React + TypeScript + Vite</td><td>Real-time pipeline visualisation, conversation UI, dark/light theme</td></tr>
+      <tr><td>Infrastructure</td><td>Docker Compose + Nginx + Cloudflare</td><td>Containerised deployment, reverse proxy, SSL termination, CDN</td></tr>
+    </tbody>
+  </table>
+
+</div>
+
+<!-- Footer -->
+<div class="footer">
+  <p>
+    <a href="/">SmartMovieSearch</a> &nbsp;·&nbsp;
+    <a href="https://github.com/worldwidejimmy/pipeline" target="_blank">Source on GitHub</a> &nbsp;·&nbsp;
+    Built with LangGraph, Milvus, Groq, React
+  </p>
+</div>
+
+</body>
+</html>
