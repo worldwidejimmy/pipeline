@@ -37,6 +37,14 @@ export default function App() {
   const [history, setHistory]     = useState<Turn[]>([])
   const [threadId, setThreadId]   = useState(generateThreadId)
   const [turnNumber, setTurnNum]  = useState(0)
+  const [theme, setTheme]         = useState<'dark' | 'light'>(() =>
+    (localStorage.getItem('sms-theme') as 'dark' | 'light') ?? 'dark'
+  )
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+    localStorage.setItem('sms-theme', theme)
+  }, [theme])
 
   const esRef        = useRef<EventSource | null>(null)
   const answerEndRef = useRef<HTMLDivElement>(null)
@@ -156,6 +164,14 @@ export default function App() {
                 {history.length} turn{history.length !== 1 ? 's' : ''}
               </span>
             )}
+            <button
+              className="theme-toggle"
+              onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
+              title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+              aria-label="Toggle theme"
+            >
+              {theme === 'dark' ? '☀️' : '🌙'}
+            </button>
             <button
               className="new-chat-btn"
               onClick={startNewConversation}

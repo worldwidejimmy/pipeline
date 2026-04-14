@@ -123,25 +123,19 @@ async def _stream_pipeline(question: str, thread_id: str) -> AsyncIterator[str]:
 
                 yield _sse("agent_end", payload)
 
-            # ── LLM lifecycle ─────────────────────────────────────────────────
+            # ── LLM lifecycle (LangChain 1.2+ emits on_chat_model_* for BaseChatModel) ─
 
-            elif etype == "on_llm_start":
-                model_name = ""
-                if hasattr(data.get("serialized"), "get"):
-                    model_name = (
-                        data["serialized"].get("kwargs", {}).get("model_name", "")
-                        or data["serialized"].get("kwargs", {}).get("model", "")
-                    )
+            elif etype == "on_chat_model_start":
                 yield _sse("llm_start", {
                     "agent": current_agent,
-                    "model": model_name or "groq",
+                    "model": event.get("name", "groq"),
                 })
 
-            elif etype == "on_llm_stream":
+            elif etype == "on_chat_model_stream":
                 chunk = data.get("chunk")
                 if chunk is None:
                     continue
-                content = chunk.content if hasattr(chunk, "content") else str(chunk)
+                content = chunk.content if isinstance(getattr(chunk, "content", None), str) else ""
                 if content:
                     yield _sse("token", {
                         "content":  content,
@@ -149,27 +143,13 @@ async def _stream_pipeline(question: str, thread_id: str) -> AsyncIterator[str]:
                         "is_final": synthesis_streaming,
                     })
 
-            elif etype == "on_llm_end":
-                output = data.get("output", {})
-                usage  = {}
-                if hasattr(output, "usage_metadata") and output.usage_metadata:
-                    usage = output.usage_metadata
-                elif isinstance(output, dict):
-                    usage = output.get("usage_metadata", {})
-
-                prompt_t = (
-                    usage.get("input_tokens", 0)
-                    if isinstance(usage, dict)
-                    else getattr(usage, "input_tokens", 0)
-                )
-                compl_t = (
-                    usage.get("output_tokens", 0)
-                    if isinstance(usage, dict)
-                    else getattr(usage, "output_tokens", 0)
-                )
+            elif etype == "on_chat_model_end":
+                output = data.get("output")
+                um = getattr(output, "usage_metadata", None)
+                prompt_t = getattr(um, "input_tokens", 0) or 0
+                compl_t  = getattr(um, "output_tokens", 0) or 0
                 total_prompt_tokens     += prompt_t
                 total_completion_tokens += compl_t
-
                 yield _sse("llm_end", {
                     "agent":             current_agent,
                     "prompt_tokens":     prompt_t,
