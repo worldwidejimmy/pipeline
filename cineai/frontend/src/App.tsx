@@ -40,6 +40,7 @@ export default function App() {
   const [theme, setTheme]         = useState<'dark' | 'light'>(() =>
     (localStorage.getItem('sms-theme') as 'dark' | 'light') ?? 'dark'
   )
+  const [errorBanner, setErrorBanner] = useState<{ code: string; message: string; detail?: string } | null>(null)
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -108,7 +109,17 @@ export default function App() {
     es.addEventListener('llm_end',          e => addEvent('llm_end', e))
     es.addEventListener('chunks_retrieved', e => addEvent('chunks_retrieved', e))
     es.addEventListener('tmdb_results',     e => addEvent('tmdb_results', e))
-    es.addEventListener('pipeline_error',   e => { addEvent('error', e); setStream(false); es.close() })
+    es.addEventListener('pipeline_error', e => {
+      addEvent('error', e)
+      try {
+        const p = JSON.parse(e.data)
+        setErrorBanner({ code: p.code ?? 'pipeline_error', message: p.message ?? 'Unknown error', detail: p.detail })
+      } catch {
+        setErrorBanner({ code: 'pipeline_error', message: 'An unexpected error occurred.' })
+      }
+      setStream(false)
+      es.close()
+    })
 
     es.addEventListener('token', (e: MessageEvent) => {
       addEvent('token', e)
@@ -140,8 +151,44 @@ export default function App() {
 
   const showTrending = !answer && !isStreaming && history.length === 0
 
+  const ERROR_ICONS: Record<string, string> = {
+    rate_limit:       '⏳',
+    auth_error:       '🔑',
+    connection_error: '📡',
+    pipeline_error:   '⚠️',
+  }
+  const ERROR_TITLES: Record<string, string> = {
+    rate_limit:       'Rate limit reached',
+    auth_error:       'API key error',
+    connection_error: 'Connection failed',
+    pipeline_error:   'Pipeline error',
+  }
+
   return (
     <div className="app">
+
+      {/* ── Error banner ────────────────────────────────────────────────── */}
+      {errorBanner && (
+        <div className={`error-banner error-banner--${errorBanner.code}`} role="alert">
+          <div className="error-banner-icon">{ERROR_ICONS[errorBanner.code] ?? '⚠️'}</div>
+          <div className="error-banner-body">
+            <div className="error-banner-title">{ERROR_TITLES[errorBanner.code] ?? 'Error'}</div>
+            <div className="error-banner-message">{errorBanner.message}</div>
+            {errorBanner.detail && (
+              <details className="error-banner-detail">
+                <summary>Technical detail</summary>
+                <pre>{errorBanner.detail}</pre>
+              </details>
+            )}
+          </div>
+          <button
+            className="error-banner-close"
+            onClick={() => setErrorBanner(null)}
+            aria-label="Dismiss"
+          >✕</button>
+        </div>
+      )}
+
       {/* ── Left panel ──────────────────────────────────────────────────── */}
       <div className="panel-left">
 
