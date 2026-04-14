@@ -1,5 +1,7 @@
 # Multi-Agent Research Pipeline
 
+> 🚀 **Live demo:** [smartmoviesearch.com](https://smartmoviesearch.com) — running on the Groq free tier (100k tokens/day), so queries may be unavailable if the daily limit is reached. The ⚙️ status button in the app shows current availability.
+
 A production-minded agentic RAG system built with **LangGraph + Milvus**.
 
 A **Supervisor** agent intelligently routes each user question to the right
