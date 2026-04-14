@@ -13,19 +13,19 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:          #06060e;
-      --surface:     #0e0e1c;
-      --surface2:    #14142a;
-      --border:      #20203a;
-      --border-lit:  #2e2e52;
-      --text:        #eaeaf8;
-      --text-muted:  #7a7aae;
-      --text-dim:    #3a3a60;
-      --amber:       #f59e0b;
-      --amber-light: #fbbf24;
-      --indigo:      #6366f1;
-      --indigo-light:#818cf8;
-      --green:       #22c55e;
+      --bg:          #faf9f6;
+      --surface:     #ffffff;
+      --surface2:    #f2f0eb;
+      --border:      #e2ddd6;
+      --border-lit:  #c8c3b8;
+      --text:        #1a1612;
+      --text-muted:  #5a554e;
+      --text-dim:    #b0aa9f;
+      --amber:       #d97706;
+      --amber-light: #b45309;
+      --indigo:      #4f46e5;
+      --indigo-light:#4338ca;
+      --green:       #16a34a;
       --font-sans:   'Inter', system-ui, sans-serif;
       --font-mono:   'JetBrains Mono', monospace;
       --radius:      8px;
@@ -49,7 +49,7 @@
       position: sticky;
       top: 0;
       z-index: 100;
-      background: rgba(6,6,14,0.88);
+      background: rgba(250,249,246,0.92);
       backdrop-filter: blur(12px);
       border-bottom: 1px solid var(--border);
       padding: 0 32px;
@@ -97,8 +97,8 @@
     /* ── Hero ─────────────────────────────────────────────────────────── */
     .hero {
       background:
-        radial-gradient(ellipse 80% 60% at 50% -10%, rgba(99,102,241,0.08) 0%, transparent 60%),
-        radial-gradient(ellipse 60% 40% at 80% 110%, rgba(245,158,11,0.06) 0%, transparent 60%),
+        radial-gradient(ellipse 80% 60% at 50% -10%, rgba(79,70,229,0.06) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 80% 110%, rgba(217,119,6,0.07) 0%, transparent 60%),
         var(--bg);
       border-bottom: 1px solid var(--border);
       padding: 64px 32px 52px;
@@ -113,8 +113,8 @@
       text-transform: uppercase;
       letter-spacing: 0.1em;
       color: var(--indigo-light);
-      border: 1px solid rgba(99,102,241,0.3);
-      background: rgba(99,102,241,0.08);
+      border: 1px solid rgba(79,70,229,0.25);
+      background: rgba(79,70,229,0.07);
       padding: 4px 12px;
       border-radius: 20px;
       margin-bottom: 24px;
@@ -196,7 +196,7 @@
     .pull-quote {
       border-left: 3px solid var(--amber);
       padding: 14px 20px;
-      background: rgba(245,158,11,0.05);
+      background: rgba(217,119,6,0.06);
       border-radius: 0 var(--radius) var(--radius) 0;
       margin: 24px 0;
       font-size: 15px;
@@ -271,7 +271,7 @@
     }
     .tech-card:hover {
       border-color: var(--indigo);
-      background: rgba(99,102,241,0.05);
+      background: rgba(79,70,229,0.04);
     }
     .tech-card-label {
       font-size: 10px;
@@ -330,8 +330,8 @@
 
     /* ── Highlight boxes ──────────────────────────────────────────────── */
     .info-box {
-      background: var(--surface);
-      border: 1px solid var(--border);
+      background: rgba(79,70,229,0.04);
+      border: 1px solid rgba(79,70,229,0.15);
       border-left: 3px solid var(--indigo);
       border-radius: var(--radius);
       padding: 16px 20px;
@@ -378,10 +378,7 @@
     /* ── Print ────────────────────────────────────────────────────────── */
     @media print {
       .topbar, .topbar-back { display: none; }
-      body { background: #fff; color: #111; }
-      .hero { background: #fff; }
-      h2, h3, p, .wp-table td { color: #111; }
-      .arch-diagram { background: #f5f5f5; }
+      .arch-diagram { background: #f0f0f0; border: 1px solid #ccc; }
     }
 
     @media (max-width: 600px) {
