@@ -1,4 +1,4 @@
-import { PipelineEvent } from '../types'
+import { PipelineEvent, RagChunk } from '../types'
 
 interface Props {
   events: PipelineEvent[]
@@ -18,15 +18,33 @@ export function ChunksPanel({ events }: Props) {
     )
   }
 
+  const searchType = chunksEvent?.type === 'chunks_retrieved'
+    ? (chunksEvent.chunks[0]?.search_type ?? 'dense')
+    : null
+
   return (
     <div className="chunks-panel">
       {/* RAG chunks */}
       {chunksEvent && chunksEvent.type === 'chunks_retrieved' && (
         <>
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--blue)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.8px' }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--blue)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.8px', display: 'flex', alignItems: 'center', gap: 8 }}>
             🔍 RAG Chunks ({chunksEvent.count})
+            {searchType && (
+              <span style={{
+                fontSize: 9,
+                fontWeight: 700,
+                letterSpacing: '0.6px',
+                padding: '2px 6px',
+                borderRadius: 4,
+                background: searchType === 'hybrid' ? 'rgba(59,130,246,0.18)' : 'rgba(107,114,128,0.18)',
+                color: searchType === 'hybrid' ? 'var(--blue)' : 'var(--text-dim)',
+                border: `1px solid ${searchType === 'hybrid' ? 'rgba(59,130,246,0.35)' : 'rgba(107,114,128,0.3)'}`,
+              }}>
+                {searchType === 'hybrid' ? 'HYBRID BM25+DENSE' : 'DENSE ONLY'}
+              </span>
+            )}
           </div>
-          {chunksEvent.chunks.map((chunk, i) => (
+          {chunksEvent.chunks.map((chunk: RagChunk, i: number) => (
             <div className="chunk-card" key={i}>
               <div className="chunk-header">
                 <span className="chunk-source">{chunk.source.split('/').pop()}</span>

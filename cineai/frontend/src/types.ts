@@ -60,9 +60,17 @@ export interface LlmEndEvent {
   ts: number;
 }
 
+export interface RagChunk {
+  text: string;
+  score: number;
+  source: string;
+  /** 'hybrid' = BM25 + dense (Milvus 2.5); 'dense' = embedding-only fallback */
+  search_type?: 'hybrid' | 'dense';
+}
+
 export interface ChunksRetrievedEvent {
   type: 'chunks_retrieved';
-  chunks: Array<{ text: string; score: number; source: string }>;
+  chunks: RagChunk[];
   count: number;
   ts: number;
 }

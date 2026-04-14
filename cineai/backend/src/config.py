@@ -29,6 +29,10 @@ class Config:
     chunk_size: int = 800
     chunk_overlap: int = 100
 
+    # Hybrid search
+    embedding_dim: int = 1536          # text-embedding-3-small output dim
+    hybrid_rrf_k: int = int(os.getenv("HYBRID_RRF_K", "60"))  # RRF rank fusion k
+
 
 @lru_cache(maxsize=1)
 def get_config() -> Config:
