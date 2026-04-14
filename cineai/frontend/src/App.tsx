@@ -6,6 +6,7 @@ import { AgentTimeline } from './components/AgentTimeline'
 import { EventLog } from './components/EventLog'
 import { MetricsBar } from './components/MetricsBar'
 import { ChunksPanel } from './components/ChunksPanel'
+import { KnowledgeModal } from './components/KnowledgeModal'
 
 const EXAMPLE_QUERIES = [
   { icon: '🕵️', text: 'Show me good bank heist movies' },
@@ -41,11 +42,18 @@ export default function App() {
     (localStorage.getItem('sms-theme') as 'dark' | 'light') ?? 'dark'
   )
   const [errorBanner, setErrorBanner] = useState<{ code: string; message: string; detail?: string } | null>(null)
+  const [showKnowledge, setShowKnowledge] = useState(false)
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
     localStorage.setItem('sms-theme', theme)
   }, [theme])
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowKnowledge(false) }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
 
   const esRef        = useRef<EventSource | null>(null)
   const answerEndRef = useRef<HTMLDivElement>(null)
@@ -167,6 +175,14 @@ export default function App() {
   return (
     <div className="app">
 
+      {/* ── Knowledge modal ─────────────────────────────────────────────── */}
+      {showKnowledge && (
+        <KnowledgeModal
+          onClose={() => setShowKnowledge(false)}
+          onSearch={q => { setQuery(q); runQuery(q) }}
+        />
+      )}
+
       {/* ── Error banner ────────────────────────────────────────────────── */}
       {errorBanner && (
         <div className={`error-banner error-banner--${errorBanner.code}`} role="alert">
@@ -211,6 +227,24 @@ export default function App() {
                 {history.length} turn{history.length !== 1 ? 's' : ''}
               </span>
             )}
+            <button
+              className="header-icon-btn"
+              onClick={() => setShowKnowledge(true)}
+              title="Browse knowledge base"
+              aria-label="Knowledge base"
+            >
+              📚
+            </button>
+            <a
+              className="header-icon-btn"
+              href="/whitepaper.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Technical white paper"
+              aria-label="White paper"
+            >
+              📄
+            </a>
             <button
               className="theme-toggle"
               onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
