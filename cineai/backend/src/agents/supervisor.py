@@ -22,13 +22,17 @@ Classify the user's question into exactly one of these routing decisions:
   all         – needs all three sources
 
 Rules:
-- Questions about specific movie details, ratings, cast → tmdb
-- Questions about film theory, director style, historical context → rag
+- Questions about a specific movie or TV show title → tmdb  (even if just "Tell me about [title]")
+- Questions about a specific actor, director, or person in film → tmdb
+- Questions about movie plot, cast, ratings, runtime, release year → tmdb
+- Questions about trending, popular, or recently released films → tmdb
+- Questions about film theory, director style, cinematography, historical context → rag
 - Questions about box office this week, upcoming releases, recent news → search
 - Questions combining "what is X about" + "how does it compare historically" → tmdb+rag
 - Questions about trending + current news → tmdb+search
 - General recommendations with context → all
 - Follow-up questions that reference previous answers → use same or broader routing
+- When in doubt between tmdb and rag, prefer tmdb
 
 {history_block}
 Reply with ONLY the routing decision word(s). No explanation. No punctuation.
