@@ -157,7 +157,37 @@ async def _stream_pipeline(question: str, thread_id: str) -> AsyncIterator[str]:
                 })
 
     except Exception as exc:
-        yield _sse("pipeline_error", {"message": str(exc)})
+        raw = str(exc)
+        if "rate_limit_exceeded" in raw or "429" in raw:
+            # Parse retry time if present (e.g. "Please try again in 4m10s")
+            import re
+            wait = ""
+            m = re.search(r"try again in ([\d]+m[\d.]+s|[\d.]+s)", raw)
+            if m:
+                wait = f" Try again in {m.group(1)}."
+            yield _sse("pipeline_error", {
+                "code":    "rate_limit",
+                "message": f"API rate limit reached — daily free-tier token quota used up.{wait}",
+                "detail":  raw,
+            })
+        elif "401" in raw or "invalid_api_key" in raw.lower() or "authentication" in raw.lower():
+            yield _sse("pipeline_error", {
+                "code":    "auth_error",
+                "message": "API key invalid or missing. Check GROQ_API_KEY / OPENAI_API_KEY in your .env file.",
+                "detail":  raw,
+            })
+        elif "Connection" in raw or "connect" in raw.lower() or "timeout" in raw.lower():
+            yield _sse("pipeline_error", {
+                "code":    "connection_error",
+                "message": "Could not reach an upstream API (Groq / TMDB / Tavily). Check network and service status.",
+                "detail":  raw,
+            })
+        else:
+            yield _sse("pipeline_error", {
+                "code":    "pipeline_error",
+                "message": "Something went wrong in the pipeline.",
+                "detail":  raw,
+            })
         return
 
     total_ms = int(time.time() * 1000) - start_ms
