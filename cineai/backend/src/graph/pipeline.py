@@ -7,25 +7,22 @@ Flow:
   synthesise → END
 
 State keys:
-  question   – raw user question
-  routing    – supervisor decision: "tmdb" | "rag" | "search" | "tmdb+rag" |
-               "tmdb+search" | "rag+search" | "all"
-  tmdb_result    – formatted output from TMDB agent
-  rag_result     – formatted output from RAG agent
-  search_result  – formatted output from web search agent
-  answer         – final synthesised answer
+  question      – current user question
+  history       – list of previous {q, a} turns (last 10 kept)
+  routing       – supervisor decision: tmdb|rag|search|tmdb+rag|etc.
+  tmdb_result   – formatted output from TMDB agent
+  rag_result    – formatted output from RAG agent
+  search_result – formatted output from web search agent
+  answer        – final synthesised answer
 """
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Literal
 
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_groq import ChatGroq
 from langgraph.graph import END, START, StateGraph
+from langgraph.checkpoint.memory import MemorySaver
 from typing_extensions import TypedDict
 
-from src.config import get_config
 from src.agents.supervisor import supervisor_route_node
 from src.agents.tmdb_agent import tmdb_agent_node
 from src.agents.rag_agent import rag_agent_node
@@ -37,6 +34,7 @@ from src.agents.synthesiser import synthesise_node
 
 class CineState(TypedDict, total=False):
     question: str
+    history: list[dict]        # [{"q": "...", "a": "..."}] — last 10 turns
     routing: str
     tmdb_result: str
     rag_result: str
@@ -47,9 +45,8 @@ class CineState(TypedDict, total=False):
 # ── Routing logic ─────────────────────────────────────────────────────────────
 
 def _dispatch(state: CineState) -> list[str]:
-    """Return the list of agent nodes to activate based on routing decision."""
+    """Return agent nodes to activate based on routing decision."""
     routing = (state.get("routing") or "tmdb").lower()
-
     mapping: dict[str, list[str]] = {
         "tmdb":         ["tmdb_agent"],
         "rag":          ["rag_agent"],
@@ -62,11 +59,16 @@ def _dispatch(state: CineState) -> list[str]:
     return mapping.get(routing, ["tmdb_agent"])
 
 
-# ── Build graph ───────────────────────────────────────────────────────────────
+# ── Singletons ────────────────────────────────────────────────────────────────
+
+@lru_cache(maxsize=1)
+def _get_memory() -> MemorySaver:
+    return MemorySaver()
+
 
 @lru_cache(maxsize=1)
 def build_pipeline():
-    """Compile and return the LangGraph pipeline (cached singleton)."""
+    """Compile and return the LangGraph pipeline with memory checkpointer."""
     g = StateGraph(CineState)
 
     g.add_node("supervisor_route", supervisor_route_node)
@@ -77,7 +79,6 @@ def build_pipeline():
 
     g.add_edge(START, "supervisor_route")
 
-    # Fan-out: supervisor → one or more agents (parallel when multiple)
     g.add_conditional_edges(
         "supervisor_route",
         _dispatch,
@@ -88,10 +89,9 @@ def build_pipeline():
         },
     )
 
-    # All agents converge to synthesiser
     for node in ("tmdb_agent", "rag_agent", "search_agent"):
         g.add_edge(node, "synthesise")
 
     g.add_edge("synthesise", END)
 
-    return g.compile()
+    return g.compile(checkpointer=_get_memory())
