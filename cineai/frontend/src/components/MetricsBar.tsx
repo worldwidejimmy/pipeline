@@ -36,13 +36,13 @@ export function MetricsBar({ events, isStreaming }: Props) {
       </div>
       <div className="metric-item">
         <span className="metric-label">Tokens</span>
-        <span className="metric-value yellow">
+        <span className="metric-value amber">
           {totalTokens ? totalTokens.toLocaleString() : '—'}
         </span>
       </div>
       <div className="metric-item">
         <span className="metric-label">LLM Calls</span>
-        <span className="metric-value purple">{llmCalls || '—'}</span>
+        <span className="metric-value indigo">{llmCalls || '—'}</span>
       </div>
       <div className="metric-item">
         <span className="metric-label">Routing</span>
