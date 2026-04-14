@@ -247,6 +247,78 @@ async def search(q: str = Query(..., min_length=1)):
     return await tmdb_client.search_movies(q)
 
 
+@app.get("/api/status")
+async def service_status():
+    """Return health of all services and API key presence (not values)."""
+    import os, time, httpx
+    from src.config import get_config
+    cfg = get_config()
+
+    results: dict = {}
+
+    # ── API key presence ────────────────────────────────────────────────
+    results["keys"] = {
+        "groq":    bool(cfg.groq_api_key   and not cfg.groq_api_key.startswith("gsk_your")),
+        "openai":  bool(cfg.openai_api_key and not cfg.openai_api_key.startswith("sk-your")),
+        "tmdb":    bool(cfg.tmdb_bearer_token and len(cfg.tmdb_bearer_token) > 20),
+        "tavily":  bool(os.getenv("TAVILY_API_KEY", "").startswith("tvly-") and
+                        not os.getenv("TAVILY_API_KEY","").endswith("_here")),
+    }
+
+    # ── Milvus ──────────────────────────────────────────────────────────
+    try:
+        from pymilvus import MilvusClient
+        t0 = time.time()
+        client = MilvusClient(uri=cfg.milvus_uri)
+        stats  = client.get_collection_stats(cfg.milvus_collection)
+        results["milvus"] = {
+            "status":   "ok",
+            "latency_ms": int((time.time() - t0) * 1000),
+            "chunks":   stats.get("row_count", 0),
+            "collection": cfg.milvus_collection,
+        }
+    except Exception as e:
+        results["milvus"] = {"status": "error", "detail": str(e)[:120]}
+
+    # ── Groq ────────────────────────────────────────────────────────────
+    try:
+        from langchain_groq import ChatGroq
+        from langchain_core.messages import HumanMessage
+        t0 = time.time()
+        llm = ChatGroq(model=cfg.groq_model, api_key=cfg.groq_api_key, max_tokens=5)
+        await llm.ainvoke([HumanMessage(content="hi")])
+        results["groq"] = {"status": "ok", "model": cfg.groq_model,
+                           "latency_ms": int((time.time() - t0) * 1000)}
+    except Exception as e:
+        raw = str(e)
+        if "rate_limit" in raw or "429" in raw:
+            import re
+            wait = ""
+            m = re.search(r"try again in ([\w.]+)", raw)
+            if m: wait = m.group(1)
+            results["groq"] = {"status": "rate_limited", "model": cfg.groq_model,
+                                "retry_in": wait, "detail": "Daily token quota used up"}
+        elif "401" in raw or "invalid" in raw.lower():
+            results["groq"] = {"status": "auth_error", "model": cfg.groq_model}
+        else:
+            results["groq"] = {"status": "error", "detail": raw[:120]}
+
+    # ── TMDB ────────────────────────────────────────────────────────────
+    try:
+        t0 = time.time()
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(
+                f"{cfg.tmdb_base_url}/configuration",
+                headers={"Authorization": f"Bearer {cfg.tmdb_bearer_token}"},
+            )
+            r.raise_for_status()
+        results["tmdb"] = {"status": "ok", "latency_ms": int((time.time() - t0) * 1000)}
+    except Exception as e:
+        results["tmdb"] = {"status": "error", "detail": str(e)[:80]}
+
+    return results
+
+
 @app.get("/api/knowledge")
 async def knowledge_base():
     """Return a summary of what's in the Milvus RAG knowledge base."""
