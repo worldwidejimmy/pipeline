@@ -23,6 +23,10 @@ from src.tools import tmdb_client
 
 app = FastAPI(title="SmartMovieSearch", version="2.0.0")
 
+# ── In-memory rate-limit tracker ────────────────────────────────────────────
+# Set whenever a pipeline call hits a Groq 429; cleared when status ping succeeds.
+_groq_rate_limit: dict | None = None   # {"message": str, "retry_in": str, "at": float}
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -159,15 +163,21 @@ async def _stream_pipeline(question: str, thread_id: str) -> AsyncIterator[str]:
     except Exception as exc:
         raw = str(exc)
         if "rate_limit_exceeded" in raw or "429" in raw:
-            # Parse retry time if present (e.g. "Please try again in 4m10s")
             import re
             wait = ""
             m = re.search(r"try again in ([\d]+m[\d.]+s|[\d.]+s)", raw)
             if m:
-                wait = f" Try again in {m.group(1)}."
+                wait = m.group(1)
+            # Record in global tracker so /api/status can surface it
+            global _groq_rate_limit
+            _groq_rate_limit = {
+                "message":  "Daily free-tier token quota used up (100k tokens/day).",
+                "retry_in": wait,
+                "at":       time.time(),
+            }
             yield _sse("pipeline_error", {
                 "code":    "rate_limit",
-                "message": f"API rate limit reached — daily free-tier token quota used up.{wait}",
+                "message": f"API rate limit reached — daily free-tier token quota used up.{(' Try again in ' + wait + '.') if wait else ''}",
                 "detail":  raw,
             })
         elif "401" in raw or "invalid_api_key" in raw.lower() or "authentication" in raw.lower():
@@ -281,14 +291,27 @@ async def service_status():
         results["milvus"] = {"status": "error", "detail": str(e)[:120]}
 
     # ── Groq ────────────────────────────────────────────────────────────
+    global _groq_rate_limit
     try:
         from langchain_groq import ChatGroq
         from langchain_core.messages import HumanMessage
         t0 = time.time()
         llm = ChatGroq(model=cfg.groq_model, api_key=cfg.groq_api_key, max_tokens=5)
         await llm.ainvoke([HumanMessage(content="hi")])
-        results["groq"] = {"status": "ok", "model": cfg.groq_model,
-                           "latency_ms": int((time.time() - t0) * 1000)}
+        latency = int((time.time() - t0) * 1000)
+        # Ping succeeded — if we had a recent rate-limit (< 5 min ago), it may still
+        # affect real queries (tiny pings use almost no tokens). Keep warning if recent.
+        if _groq_rate_limit and (time.time() - _groq_rate_limit["at"]) < 300:
+            results["groq"] = {
+                "status":     "rate_limited",
+                "model":      cfg.groq_model,
+                "latency_ms": latency,
+                "retry_in":   _groq_rate_limit.get("retry_in", ""),
+                "detail":     _groq_rate_limit["message"] + " (status ping uses minimal tokens)",
+            }
+        else:
+            _groq_rate_limit = None   # clear stale warning
+            results["groq"] = {"status": "ok", "model": cfg.groq_model, "latency_ms": latency}
     except Exception as e:
         raw = str(e)
         if "rate_limit" in raw or "429" in raw:
@@ -296,6 +319,7 @@ async def service_status():
             wait = ""
             m = re.search(r"try again in ([\w.]+)", raw)
             if m: wait = m.group(1)
+            _groq_rate_limit = {"message": "Daily token quota used up.", "retry_in": wait, "at": time.time()}
             results["groq"] = {"status": "rate_limited", "model": cfg.groq_model,
                                 "retry_in": wait, "detail": "Daily token quota used up"}
         elif "401" in raw or "invalid" in raw.lower():
