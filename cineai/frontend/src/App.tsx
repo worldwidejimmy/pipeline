@@ -7,6 +7,7 @@ import { EventLog } from './components/EventLog'
 import { MetricsBar } from './components/MetricsBar'
 import { ChunksPanel } from './components/ChunksPanel'
 import { KnowledgeModal } from './components/KnowledgeModal'
+import { StatusModal } from './components/StatusModal'
 
 const EXAMPLE_QUERIES = [
   { icon: '🕵️', text: 'Show me good bank heist movies' },
@@ -43,6 +44,7 @@ export default function App() {
   )
   const [errorBanner, setErrorBanner] = useState<{ code: string; message: string; detail?: string } | null>(null)
   const [showKnowledge, setShowKnowledge] = useState(false)
+  const [showStatus,    setShowStatus]    = useState(false)
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -50,7 +52,7 @@ export default function App() {
   }, [theme])
 
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowKnowledge(false) }
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') { setShowKnowledge(false); setShowStatus(false) } }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [])
@@ -175,6 +177,9 @@ export default function App() {
   return (
     <div className="app">
 
+      {/* ── Status modal ────────────────────────────────────────────────── */}
+      {showStatus && <StatusModal onClose={() => setShowStatus(false)} />}
+
       {/* ── Knowledge modal ─────────────────────────────────────────────── */}
       {showKnowledge && (
         <KnowledgeModal
@@ -227,6 +232,14 @@ export default function App() {
                 {history.length} turn{history.length !== 1 ? 's' : ''}
               </span>
             )}
+            <button
+              className="header-icon-btn"
+              onClick={() => setShowStatus(true)}
+              title="Service status"
+              aria-label="Service status"
+            >
+              ⚙️
+            </button>
             <button
               className="header-icon-btn"
               onClick={() => setShowKnowledge(true)}
