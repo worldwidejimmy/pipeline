@@ -247,6 +247,32 @@ async def search(q: str = Query(..., min_length=1)):
     return await tmdb_client.search_movies(q)
 
 
+@app.get("/api/knowledge")
+async def knowledge_base():
+    """Return a summary of what's in the Milvus RAG knowledge base."""
+    try:
+        from pymilvus import MilvusClient
+        from src.config import get_config
+        cfg = get_config()
+        client = MilvusClient(uri=cfg.milvus_uri)
+        rows = client.query(
+            cfg.milvus_collection,
+            filter="",
+            output_fields=["source"],
+            limit=5000,
+        )
+        from collections import Counter
+        counts = Counter(r["source"] for r in rows)
+        docs = [{"source": src, "chunks": n} for src, n in sorted(counts.items())]
+        return {
+            "total_chunks": sum(counts.values()),
+            "total_docs": len(docs),
+            "docs": docs,
+        }
+    except Exception as exc:
+        return {"total_chunks": 0, "total_docs": 0, "docs": [], "error": str(exc)}
+
+
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "service": "smartmoviesearch-backend", "version": "2.0.0"}
