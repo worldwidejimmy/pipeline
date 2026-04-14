@@ -331,7 +331,10 @@ export default function App() {
                   <div
                     key={m.id}
                     className="movie-card"
-                    onClick={() => { setQuery(`Tell me about ${m.title}`); runQuery(`Tell me about ${m.title}`) }}
+                    onClick={() => {
+                      const q = `Tell me about the movie ${m.title}${m.year ? ` (${m.year})` : ''}`
+                      setQuery(q); runQuery(q)
+                    }}
                   >
                     <div className="movie-card-poster-wrap">
                       {m.poster
