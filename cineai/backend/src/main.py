@@ -161,14 +161,21 @@ async def _stream_pipeline(question: str, thread_id: str) -> AsyncIterator[str]:
                 })
 
     except Exception as exc:
+        import re as _re
         raw = str(exc)
+
+        def _sanitize(text: str) -> str:
+            """Strip account/org identifiers from error messages before sending to frontend."""
+            text = _re.sub(r"\borg_[A-Za-z0-9]+\b", "[org-id]", text)
+            text = _re.sub(r"\buser_[A-Za-z0-9]+\b", "[user-id]", text)
+            text = _re.sub(r"\bproj_[A-Za-z0-9]+\b", "[proj-id]", text)
+            return text
+
         if "rate_limit_exceeded" in raw or "429" in raw:
-            import re
             wait = ""
-            m = re.search(r"try again in ([\d]+m[\d.]+s|[\d.]+s)", raw)
+            m = _re.search(r"try again in ([\d]+m[\d.]+s|[\d.]+s)", raw)
             if m:
                 wait = m.group(1)
-            # Record in global tracker so /api/status can surface it
             global _groq_rate_limit
             _groq_rate_limit = {
                 "message":  "Daily free-tier token quota used up (100k tokens/day).",
@@ -178,25 +185,25 @@ async def _stream_pipeline(question: str, thread_id: str) -> AsyncIterator[str]:
             yield _sse("pipeline_error", {
                 "code":    "rate_limit",
                 "message": f"API rate limit reached — daily free-tier token quota used up.{(' Try again in ' + wait + '.') if wait else ''}",
-                "detail":  raw,
+                "detail":  _sanitize(raw),
             })
         elif "401" in raw or "invalid_api_key" in raw.lower() or "authentication" in raw.lower():
             yield _sse("pipeline_error", {
                 "code":    "auth_error",
                 "message": "API key invalid or missing. Check GROQ_API_KEY / OPENAI_API_KEY in your .env file.",
-                "detail":  raw,
+                "detail":  _sanitize(raw),
             })
         elif "Connection" in raw or "connect" in raw.lower() or "timeout" in raw.lower():
             yield _sse("pipeline_error", {
                 "code":    "connection_error",
                 "message": "Could not reach an upstream API (Groq / TMDB / Tavily). Check network and service status.",
-                "detail":  raw,
+                "detail":  _sanitize(raw),
             })
         else:
             yield _sse("pipeline_error", {
                 "code":    "pipeline_error",
                 "message": "Something went wrong in the pipeline.",
-                "detail":  raw,
+                "detail":  _sanitize(raw),
             })
         return
 
