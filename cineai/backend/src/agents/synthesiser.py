@@ -1,6 +1,6 @@
 """
 Synthesiser — merges outputs from all active agents into a single,
-coherent answer. This node's LLM tokens stream as the final visible answer.
+coherent answer. Maintains conversation history in state.
 """
 from __future__ import annotations
 
@@ -17,12 +17,18 @@ Instructions:
 - Merge complementary information; do not repeat the same facts
 - Resolve any contradictions by noting the discrepancy
 - Maintain a consistent, engaging tone
-- Use markdown formatting: headers, bullet points, bold for movie titles
-- If only one agent ran, just clean up and present that output
+- Use markdown: **bold** for film titles, bullet points for lists, headers for sections
+- If only one agent ran, clean up and present that output directly
 - Do not invent information not present in the agent outputs
+{history_note}
 
 Agent Outputs:
 {agent_outputs}
+"""
+
+_HISTORY_NOTE = """
+The user has asked follow-up questions before. Keep your answer focused on what's new —
+don't repeat information already covered in the conversation history unless the user asks.
 """
 
 
@@ -38,30 +44,41 @@ def _get_llm() -> ChatGroq:
 
 
 async def synthesise_node(state: dict) -> dict:
-    """LangGraph node: merge all agent results into final answer."""
+    """LangGraph node: merge all agent results → final answer, update history."""
     question = state["question"]
+    history  = state.get("history") or []
 
     sections: list[str] = []
     if state.get("tmdb_result"):
-        sections.append(f"### TMDB Agent Output\n{state['tmdb_result']}")
+        sections.append(f"### TMDB Agent\n{state['tmdb_result']}")
     if state.get("rag_result"):
-        sections.append(f"### RAG Knowledge Base Output\n{state['rag_result']}")
+        sections.append(f"### RAG Knowledge Base\n{state['rag_result']}")
     if state.get("search_result"):
-        sections.append(f"### Web Search Output\n{state['search_result']}")
+        sections.append(f"### Web Search\n{state['search_result']}")
 
     if not sections:
-        return {"answer": "No agent produced a result. Please try a different question."}
+        answer = "No agent produced a result. Please try a different question."
+        new_history = history + [{"q": question, "a": answer}]
+        return {"answer": answer, "history": new_history[-10:]}
 
-    # Single source — no synthesis needed, just return as-is
+    # Single source — skip synthesis overhead
     if len(sections) == 1:
-        return {"answer": sections[0].split("\n", 1)[-1].strip()}
+        answer = sections[0].split("\n", 1)[-1].strip()
+        new_history = history + [{"q": question, "a": answer}]
+        return {"answer": answer, "history": new_history[-10:]}
 
+    history_note = _HISTORY_NOTE if history else ""
     combined = "\n\n".join(sections)
     llm = _get_llm()
 
     response = await llm.ainvoke([
-        SystemMessage(content=_SYSTEM.format(agent_outputs=combined)),
+        SystemMessage(content=_SYSTEM.format(
+            agent_outputs=combined,
+            history_note=history_note,
+        )),
         HumanMessage(content=f"Question: {question}"),
     ])
 
-    return {"answer": response.content}
+    answer = response.content
+    new_history = history + [{"q": question, "a": answer}]
+    return {"answer": answer, "history": new_history[-10:]}

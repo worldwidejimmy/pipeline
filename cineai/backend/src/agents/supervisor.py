@@ -1,15 +1,7 @@
 """
 Supervisor agent — classifies the user's question and decides which
-downstream agents to invoke.
-
-Routing outputs (single token):
-  tmdb        → real-time movie/TV data only
-  rag         → knowledge-base search only
-  search      → live web search only
-  tmdb+rag    → real-time data + knowledge base
-  tmdb+search → real-time data + web search
-  rag+search  → knowledge base + web search
-  all         → all three agents
+downstream agents to invoke. Uses conversation history for follow-up
+questions so routing stays coherent across turns.
 """
 from __future__ import annotations
 
@@ -35,10 +27,18 @@ Rules:
 - Questions about box office this week, upcoming releases, recent news → search
 - Questions combining "what is X about" + "how does it compare historically" → tmdb+rag
 - Questions about trending + current news → tmdb+search
-- General "what should I watch" with context → all
+- General recommendations with context → all
+- Follow-up questions that reference previous answers → use same or broader routing
 
+{history_block}
 Reply with ONLY the routing decision word(s). No explanation. No punctuation.
 Examples: "tmdb" or "tmdb+rag" or "all"
+"""
+
+_HISTORY_BLOCK = """Conversation so far (most recent first):
+{turns}
+
+The user's new question may be a follow-up to the above.
 """
 
 
@@ -55,16 +55,27 @@ def _get_llm() -> ChatGroq:
 async def supervisor_route_node(state: dict) -> dict:
     """LangGraph node: classify question → routing decision."""
     question = state["question"]
+    history  = state.get("history") or []
+
+    # Build history context for the prompt
+    if history:
+        recent = history[-3:]  # last 3 turns
+        turns_text = "\n".join(
+            f"Q: {h['q']}\nA: {h['a'][:150]}…" for h in reversed(recent)
+        )
+        history_block = _HISTORY_BLOCK.format(turns=turns_text)
+    else:
+        history_block = ""
+
+    system = _SYSTEM.format(history_block=history_block)
     llm = _get_llm()
 
     response = await llm.ainvoke([
-        SystemMessage(content=_SYSTEM),
+        SystemMessage(content=system),
         HumanMessage(content=question),
     ])
 
     raw = response.content.strip().lower()
-
-    # Normalise to known values
     valid = {"tmdb", "rag", "search", "tmdb+rag", "tmdb+search", "rag+search", "all"}
     routing = raw if raw in valid else "tmdb+rag"
 
