@@ -6,6 +6,7 @@ Endpoints:
   GET /api/history?thread_id=<id>             Conversation history for a thread
   GET /api/trending                           Trending movies from TMDB
   GET /api/search?q=<title>                   Quick TMDB title search
+  GET /api/rules                              Routing rules JSON (Rules modal)
   GET /api/health                             Health check
 """
 from __future__ import annotations
@@ -40,7 +41,7 @@ app.add_middleware(
 )
 
 _AGENT_NODES = {
-    "supervisor_route", "tmdb_agent", "rag_agent", "search_agent", "synthesise"
+    "supervisor_route", "tmdb_agent", "rag_agent", "search_agent", "music_agent", "synthesise"
 }
 
 
@@ -123,6 +124,16 @@ async def _stream_pipeline(question: str, thread_id: str) -> AsyncIterator[str]:
                         yield _sse("tmdb_results", {
                             "results": results[:5],
                             "count": len(results),
+                        })
+
+                if ename == "music_agent":
+                    raw = output.get("_music_raw", {})
+                    detail = raw.get("detail", {})
+                    if detail:
+                        yield _sse("music_results", {
+                            "artist": detail.get("name"),
+                            "albums": detail.get("albums", [])[:5],
+                            "genres": detail.get("genres", []),
                         })
 
                 yield _sse("agent_end", payload)
@@ -377,6 +388,69 @@ async def knowledge_base():
         }
     except Exception as exc:
         return {"total_chunks": 0, "total_docs": 0, "docs": [], "error": str(exc)}
+
+
+@app.get("/api/rules")
+async def get_routing_rules():
+    """Return the routing rules and keyword overrides used by the supervisor agent."""
+    from src.agents.supervisor import (
+        _FORCE_MUSIC_KEYWORDS,
+        _FORCE_TMDB_KEYWORDS,
+        SUPERVISOR_LLM_RULE_BULLETS,
+    )
+    from src.config import get_config
+    cfg = get_config()
+    return {
+        "model": cfg.groq_model,
+        "agents": [
+            {
+                "id": "tmdb",
+                "name": "TMDB Agent",
+                "icon": "🎬",
+                "description": "Real-time movie & TV database — ratings, cast, plot, trending, release info",
+                "source": "themoviedb.org",
+            },
+            {
+                "id": "rag",
+                "name": "RAG Agent",
+                "icon": "📚",
+                "description": "Knowledge base search — film theory, director styles, history, deep analysis",
+                "source": "Milvus vector DB",
+            },
+            {
+                "id": "search",
+                "name": "Web Search Agent",
+                "icon": "🌐",
+                "description": "Live web search — current news, this week's box office, just-released content",
+                "source": "Tavily API",
+            },
+            {
+                "id": "music",
+                "name": "Music Agent",
+                "icon": "🎵",
+                "description": "Music artist & album data — discography, genres, release years, songwriting",
+                "source": "MusicBrainz",
+            },
+        ],
+        "routing_decisions": [
+            { "key": "tmdb",         "description": "Movie/TV database only" },
+            { "key": "rag",          "description": "Knowledge base only" },
+            { "key": "search",       "description": "Live web search only" },
+            { "key": "music",        "description": "Music database only" },
+            { "key": "tmdb+rag",     "description": "Movie/TV data + deep analysis" },
+            { "key": "tmdb+search",  "description": "Movie/TV data + current news" },
+            { "key": "tmdb+music",   "description": "Movie/TV data + music (film composers, concert docs)" },
+            { "key": "music+search", "description": "Music data + current news (new releases)" },
+            { "key": "rag+search",   "description": "Knowledge base + current news" },
+            { "key": "all",          "description": "All agents in parallel" },
+        ],
+        "keyword_overrides": {
+            "description": "Deterministic rules checked before the LLM — these always win",
+            "music": _FORCE_MUSIC_KEYWORDS,
+            "tmdb":  _FORCE_TMDB_KEYWORDS,
+        },
+        "llm_rules": list(SUPERVISOR_LLM_RULE_BULLETS),
+    }
 
 
 @app.get("/api/health")

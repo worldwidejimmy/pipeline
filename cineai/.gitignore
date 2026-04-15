@@ -13,3 +13,7 @@ frontend/dist/
 # Misc
 .DS_Store
 *.log
+
+# Generated / scraped RAG data (regenerate: see HANDOFF.md)
+backend/data/*
+!backend/data/.gitkeep

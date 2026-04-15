@@ -1426,6 +1426,150 @@ html, body, #root {
   background: rgba(0,0,0,0.06);
 }
 
+/* ── Routing Rules Modal ────────────────────────────────────────────────────── */
+.rules-intro {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin: 0 0 18px;
+}
+
+.rules-agent-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rules-agent-card {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+
+.rules-agent-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.rules-agent-icon { font-size: 18px; }
+
+.rules-agent-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  flex: 1;
+}
+
+.rules-agent-source {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--accent);
+  background: rgba(139, 92, 246, 0.1);
+  padding: 2px 7px;
+  border-radius: 10px;
+}
+
+.rules-agent-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.rules-route-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rules-route-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.rules-route-key {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  background: rgba(139, 92, 246, 0.12);
+  padding: 2px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+  min-width: 110px;
+  text-align: center;
+}
+
+.rules-route-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.rules-keyword-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.rules-keyword {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+.rules-keyword--music {
+  background: rgba(236, 72, 153, 0.12);
+  color: #ec4899;
+  border: 1px solid rgba(236, 72, 153, 0.25);
+}
+
+.rules-keyword--tmdb {
+  background: rgba(59, 130, 246, 0.12);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.25);
+}
+
+.rules-llm-list {
+  padding-left: 20px;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rules-llm-item {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.rules-llm-condition {
+  color: var(--text);
+}
+
+:root[data-theme="light"] .rules-keyword--music {
+  background: rgba(219, 39, 119, 0.1);
+  color: #be185d;
+}
+:root[data-theme="light"] .rules-keyword--tmdb {
+  background: rgba(37, 99, 235, 0.1);
+  color: #1d4ed8;
+}
+:root[data-theme="light"] .rules-agent-source {
+  background: rgba(109, 40, 217, 0.08);
+}
+
 /* ── Responsive ─────────────────────────────────────────────────────────────── */
 @media (max-width: 900px) {
   .app {

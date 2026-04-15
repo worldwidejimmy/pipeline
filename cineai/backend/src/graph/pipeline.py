@@ -27,6 +27,7 @@ from src.agents.supervisor import supervisor_route_node
 from src.agents.tmdb_agent import tmdb_agent_node
 from src.agents.rag_agent import rag_agent_node
 from src.agents.search_agent import search_agent_node
+from src.agents.music_agent import music_agent_node
 from src.agents.synthesiser import synthesise_node
 
 
@@ -39,6 +40,7 @@ class CineState(TypedDict, total=False):
     tmdb_result: str
     rag_result: str
     search_result: str
+    music_result: str
     answer: str
 
 
@@ -48,13 +50,16 @@ def _dispatch(state: CineState) -> list[str]:
     """Return agent nodes to activate based on routing decision."""
     routing = (state.get("routing") or "tmdb").lower()
     mapping: dict[str, list[str]] = {
-        "tmdb":         ["tmdb_agent"],
-        "rag":          ["rag_agent"],
-        "search":       ["search_agent"],
-        "tmdb+rag":     ["tmdb_agent", "rag_agent"],
-        "tmdb+search":  ["tmdb_agent", "search_agent"],
-        "rag+search":   ["rag_agent", "search_agent"],
-        "all":          ["tmdb_agent", "rag_agent", "search_agent"],
+        "tmdb":          ["tmdb_agent"],
+        "rag":           ["rag_agent"],
+        "search":        ["search_agent"],
+        "music":         ["music_agent"],
+        "tmdb+rag":      ["tmdb_agent", "rag_agent"],
+        "tmdb+search":   ["tmdb_agent", "search_agent"],
+        "tmdb+music":    ["tmdb_agent", "music_agent"],
+        "music+search":  ["music_agent", "search_agent"],
+        "rag+search":    ["rag_agent", "search_agent"],
+        "all":           ["tmdb_agent", "rag_agent", "search_agent", "music_agent"],
     }
     return mapping.get(routing, ["tmdb_agent"])
 
@@ -75,6 +80,7 @@ def build_pipeline():
     g.add_node("tmdb_agent",       tmdb_agent_node)
     g.add_node("rag_agent",        rag_agent_node)
     g.add_node("search_agent",     search_agent_node)
+    g.add_node("music_agent",      music_agent_node)
     g.add_node("synthesise",       synthesise_node)
 
     g.add_edge(START, "supervisor_route")
@@ -86,10 +92,11 @@ def build_pipeline():
             "tmdb_agent":   "tmdb_agent",
             "rag_agent":    "rag_agent",
             "search_agent": "search_agent",
+            "music_agent":  "music_agent",
         },
     )
 
-    for node in ("tmdb_agent", "rag_agent", "search_agent"):
+    for node in ("tmdb_agent", "rag_agent", "search_agent", "music_agent"):
         g.add_edge(node, "synthesise")
 
     g.add_edge("synthesise", END)
