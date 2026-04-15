@@ -5,9 +5,11 @@
 A production agentic RAG system built with **LangGraph + Milvus**, deployed as [SmartMovieSearch](https://smartmoviesearch.com) — a natural-language movie intelligence platform.
 
 A **Supervisor** agent intelligently routes each user question to the right
-sub-agent — a **RAG agent** that searches a curated knowledge base, a **TMDB agent**
-that queries live movie data, a **Web Search agent** for current news, or any
+sub-agent — a **RAG agent** that searches a curated knowledge base (markdown docs plus optional **Roger Ebert** review text from the Internet Archive), a **TMDB agent**
+that queries live movie and TV data, a **Music agent** (MusicBrainz), a **Web Search agent** for current news, or any
 combination — then synthesises the results into a single coherent streaming answer.
+
+**Handoff / operations:** see [HANDOFF.md](HANDOFF.md) for scraping Ebert reviews, routing rules API, and git conventions for generated data.
 
 ---
 
@@ -20,13 +22,16 @@ flowchart TD
         Supervisor -->|"route: rag"| RAGAgent[RAG Agent]
         Supervisor -->|"route: tmdb"| TMDBAgent[TMDB Agent]
         Supervisor -->|"route: search"| SearchAgent[Web Search Agent]
+        Supervisor -->|"route: music"| MusicAgent[Music Agent]
         RAGAgent -->|rag_result| Synthesise[Synthesise]
         TMDBAgent -->|tmdb_result| Synthesise
         SearchAgent -->|search_result| Synthesise
+        MusicAgent -->|music_result| Synthesise
     end
     RAGAgent --> Milvus[(Milvus\nVector DB)]
     TMDBAgent --> TMDB[TMDB API]
     SearchAgent --> WebAPI[Tavily API]
+    MusicAgent --> MB[MusicBrainz API]
     Synthesise --> FinalAnswer[Streaming Answer]
     LangSmith[LangSmith Tracing] -.->|observes every step| langgraph
 ```
@@ -39,10 +44,11 @@ deployable via Docker Compose.
 | Key | Type | Description |
 |---|---|---|
 | `question` | `str` | User question — set at entry |
-| `routing` | `str` | `"tmdb"` \| `"rag"` \| `"search"` \| combinations |
+| `routing` | `str` | `"tmdb"` \| `"rag"` \| `"search"` \| `"music"` \| combinations |
 | `rag_result` | `str\|None` | Output from the RAG agent |
 | `tmdb_result` | `str\|None` | Output from the TMDB agent |
 | `search_result` | `str\|None` | Output from the web search agent |
+| `music_result` | `str\|None` | Output from the music agent |
 | `answer` | `str\|None` | Synthesised final answer |
 | `history` | `list` | Multi-turn conversation memory |
 
@@ -53,11 +59,13 @@ deployable via Docker Compose.
 | Layer | Technology |
 |---|---|
 | Agent orchestration | [LangGraph](https://github.com/langchain-ai/langgraph) 1.2+ |
-| LLM | [Groq](https://groq.com) `llama-3.3-70b-versatile` |
+| LLM | [Groq](https://groq.com) — model from `GROQ_MODEL` (e.g. `llama-3.1-8b-instant` on free tier) |
 | Vector database | [Milvus](https://milvus.io) 2.5+ — hybrid BM25 + dense search |
 | Embeddings | OpenAI `text-embedding-3-small` |
-| Movie data | [TMDB API](https://www.themoviedb.org/documentation/api) |
+| Movie / TV data | [TMDB API](https://www.themoviedb.org/documentation/api) |
+| Music data | [MusicBrainz](https://musicbrainz.org/) (no API key) |
 | Web search | [Tavily](https://tavily.com) |
+| Optional RAG corpus | Roger Ebert reviews via [Internet Archive](https://web.archive.org) (see [HANDOFF.md](HANDOFF.md)) |
 | Backend | FastAPI + Server-Sent Events (SSE) streaming |
 | Frontend | React + TypeScript + Vite |
 | Observability | [LangSmith](https://smith.langchain.com) (optional) |
@@ -106,7 +114,13 @@ curl http://localhost:8001/api/health
 
 ```bash
 docker compose exec backend python scripts/ingest.py docs/
-# → ✓ Inserted 168 chunks (hybrid BM25 + dense collection)
+# Appends markdown/text into the hybrid Milvus collection
+```
+
+Optional **Roger Ebert** reviews (scraped files under `backend/data/`, gitignored): see [HANDOFF.md](HANDOFF.md), then:
+
+```bash
+docker compose exec backend python scripts/ingest_ebert.py
 ```
 
 ### 4. Open the app
@@ -133,15 +147,20 @@ pipeline/
 │   │   │   │   ├── rag_agent.py    Hybrid Milvus retrieval (BM25 + dense, RRF fusion)
 │   │   │   │   ├── tmdb_agent.py   TMDB search, discovery, filmography comparison
 │   │   │   │   ├── search_agent.py Tavily web search
+│   │   │   │   ├── music_agent.py  MusicBrainz + grounded answers
 │   │   │   │   └── synthesiser.py  Merges agent outputs → streaming final answer
 │   │   │   ├── graph/
 │   │   │   │   └── pipeline.py     LangGraph StateGraph (compiled, multi-turn)
 │   │   │   └── tools/
 │   │   │       ├── milvus_retriever.py  Hybrid search wrapper
-│   │   │       └── tmdb_client.py       TMDB API client
+│   │   │       ├── tmdb_client.py       TMDB API client
+│   │   │       └── musicbrainz_client.py MusicBrainz client
 │   │   ├── docs/                   RAG knowledge base (markdown)
+│   │   ├── data/                   Generated scrape output (gitignored; see HANDOFF.md)
 │   │   └── scripts/
-│   │       └── ingest.py           Document ingestion CLI
+│   │       ├── ingest.py           Document ingestion CLI
+│   │       ├── scrape_ebert.py     Ebert reviews via Wayback Machine
+│   │       └── ingest_ebert.py     Ebert JSONL → Milvus
 │   │
 │   └── frontend/
 │       └── src/
@@ -149,6 +168,7 @@ pipeline/
 │           └── components/
 │               ├── StatusModal.tsx  Live service health + API key status
 │               ├── KnowledgeModal.tsx  Browse RAG knowledge base
+│               ├── RoutingRulesModal.tsx Routing rules from GET /api/rules
 │               ├── PipelineGraph.tsx   Real-time agent routing visualisation
 │               ├── AgentTimeline.tsx   Per-agent latency breakdown
 │               └── EventLog.tsx        Full SSE event stream
@@ -165,8 +185,7 @@ pipeline/
 
 ### 1. Routing (Supervisor)
 
-The supervisor classifies each question into a routing decision using a single
-cheap LLM call. The result deterministically selects which agents run:
+Strong **keyword overrides** (e.g. “lyrics” → `music`) run first so small models do not mis-route. Otherwise the supervisor classifies each question with a single cheap LLM call. The result selects which agents run. **`GET /api/rules`** exposes the same rules and keyword lists for the UI.
 
 ```python
 # src/agents/supervisor.py
@@ -174,7 +193,7 @@ decision = await llm.ainvoke([
     SystemMessage(content=ROUTE_SYSTEM_PROMPT),
     HumanMessage(content=question),
 ])
-# → "tmdb" | "rag" | "search" | "tmdb+rag" | "all" | …
+# → "tmdb" | "rag" | "search" | "music" | "tmdb+rag" | "all" | …
 ```
 
 ### 2. Parallel fan-out
@@ -245,6 +264,7 @@ traced — no instrumentation code required. The LangSmith UI shows:
 | `GET /api/query?q=<question>&thread_id=<id>` | SSE stream — pipeline events + streaming answer |
 | `GET /api/status` | Live health: Groq / Milvus / TMDB + API key presence |
 | `GET /api/knowledge` | RAG knowledge base summary (sources + chunk counts) |
+| `GET /api/rules` | Routing decisions, keyword overrides, and LLM rule bullets (for the Rules modal) |
 | `GET /api/trending` | Trending movies from TMDB |
 | `GET /api/history?thread_id=<id>` | Conversation history for a thread |
 | `GET /api/health` | Health check |
@@ -258,3 +278,6 @@ traced — no instrumentation code required. The LangSmith UI shows:
 - [ ] **Streaming tokens in Event Log** — surface token stream in the observability panel alongside the answer
 - [ ] **User-provided documents** — API endpoint to ingest uploaded files into a per-session collection
 - [ ] **Multi-modal** — poster image embeddings alongside text for visual similarity search
+- [x] **Music agent + MusicBrainz** — artist/album routing and grounded answers
+- [x] **Ebert RAG pipeline** — Wayback scrape + `ingest_ebert.py` into shared Milvus collection (see HANDOFF.md)
+- [x] **Rules UI** — frontend modal backed by `/api/rules`

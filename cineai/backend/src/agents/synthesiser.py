@@ -9,7 +9,7 @@ from langchain_groq import ChatGroq
 
 from src.config import get_config
 
-_SYSTEM = """You are a senior film expert synthesising information from multiple sources.
+_SYSTEM = """You are a senior film and TV expert synthesising information from multiple sources.
 
 Combine the agent outputs below into a single, well-structured answer for the user.
 
@@ -17,9 +17,16 @@ Instructions:
 - Merge complementary information; do not repeat the same facts
 - Resolve any contradictions by noting the discrepancy
 - Maintain a consistent, engaging tone
-- Use markdown: **bold** for film titles, bullet points for lists, headers for sections
+- Use markdown: **bold** for film/show titles, bullet points for lists, headers for sections
 - If only one agent ran, clean up and present that output directly
-- Do not invent information not present in the agent outputs
+- Do NOT invent information not present in the agent outputs
+- Do NOT add facts, ratings, awards, cast members, or any details not explicitly in the data
+- PRESERVE all markdown links (TMDB, MusicBrainz) from agent outputs — do not remove or alter URLs
+
+CRITICAL — if the agent outputs indicate no data was found (e.g. "couldn't find",
+"no results", "not in the database", "knowledge base does not contain"), do NOT
+fill in the gaps from memory. Instead tell the user clearly what wasn't found and
+suggest they try a different query (check spelling, try a related title or actor name).
 {history_note}
 
 Agent Outputs:
@@ -51,6 +58,8 @@ async def synthesise_node(state: dict) -> dict:
     sections: list[str] = []
     if state.get("tmdb_result"):
         sections.append(f"### TMDB Agent\n{state['tmdb_result']}")
+    if state.get("music_result"):
+        sections.append(f"### Music Agent (MusicBrainz)\n{state['music_result']}")
     if state.get("rag_result"):
         sections.append(f"### RAG Knowledge Base\n{state['rag_result']}")
     if state.get("search_result"):

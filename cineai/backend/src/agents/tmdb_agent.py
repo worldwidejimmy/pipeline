@@ -21,8 +21,8 @@ _EXTRACT_SYSTEM = """Extract structured search intent from the user's movie/TV q
 
 Respond with JSON only (no markdown, no explanation):
 {
-  "search_type": "search_movie" | "trending" | "discover" | "search_person" | "movie_and_person",
-  "query": "<movie or show title, or null>",
+  "search_type": "search_title" | "trending" | "discover" | "search_person" | "title_and_person",
+  "query": "<movie or TV show title, or null>",
   "person": "<actor/director name when comparing against their filmography, or null>",
   "genre": "<genre name or null>",
   "year": <year as integer or null>,
@@ -30,25 +30,57 @@ Respond with JSON only (no markdown, no explanation):
   "min_rating": <float 0-10 or null>
 }
 
-Use "movie_and_person" when the question asks about a specific film AND wants to
+Use "title_and_person" when the question asks about a specific title AND wants to
 compare it against an actor's or director's broader filmography.
+Use "search_title" for any specific movie OR TV series/show lookup.
+
+Use "search_title" for any named movie, TV show, franchise, or character (e.g. "batman movies",
+"james bond films", "marvel movies" — these are title/franchise searches, not genre discovers).
+Use "discover" ONLY for pure genre/attribute queries with no specific name (e.g. "top sci-fi movies",
+"best horror films of the 90s").
 
 Examples:
-  "What is Inception about?" → {"search_type": "search_movie", "query": "Inception", "person": null, ...nulls}
+  "What is Inception about?" → {"search_type": "search_title", "query": "Inception", "person": null, ...nulls}
+  "Tell me about the Netflix series Big Mistakes" → {"search_type": "search_title", "query": "Big Mistakes", "person": null, ...nulls}
+  "batman movies" → {"search_type": "search_title", "query": "batman", "person": null, ...nulls}
+  "james bond films" → {"search_type": "search_title", "query": "james bond", "person": null, ...nulls}
+  "marvel movies" → {"search_type": "search_title", "query": "marvel", "person": null, ...nulls}
   "Top sci-fi movies of all time" → {"search_type": "discover", "query": null, "person": null, "genre": "Science Fiction", "sort_by": "vote_average.desc", ...}
+  "best horror films" → {"search_type": "discover", "query": null, "person": null, "genre": "Horror", "sort_by": "vote_average.desc", ...}
   "What's trending this week?" → {"search_type": "trending", "query": null, "person": null, ...nulls}
   "Movies by Christopher Nolan" → {"search_type": "search_person", "query": "Christopher Nolan", "person": null, ...nulls}
-  "Is Project Hail Mary Ryan Gosling's best film?" → {"search_type": "movie_and_person", "query": "Project Hail Mary", "person": "Ryan Gosling", ...nulls}
-  "How does Barbie compare to Margot Robbie's other work?" → {"search_type": "movie_and_person", "query": "Barbie", "person": "Margot Robbie", ...nulls}
+  "Is Project Hail Mary Ryan Gosling's best film?" → {"search_type": "title_and_person", "query": "Project Hail Mary", "person": "Ryan Gosling", ...nulls}
+  "How does Barbie compare to Margot Robbie's other work?" → {"search_type": "title_and_person", "query": "Barbie", "person": "Margot Robbie", ...nulls}
 """
 
-_ANSWER_SYSTEM = """You are a knowledgeable film expert assistant.
+_ANSWER_SYSTEM = """You are a knowledgeable film and TV expert assistant.
 
 Answer the user's question using ONLY the TMDB data provided below.
-Be specific — cite movie titles, ratings (vote_average), cast members, release years.
+Be specific — cite titles, ratings (vote_average), cast members, release years.
 Format your answer clearly. Use bullet points or a ranked list for comparisons.
 When filmography data is available, rank the person's movies by rating and place
-the film in question within that ranked list.
+the title in question within that ranked list.
+
+CRITICAL — always honour the media_type field in the data:
+- media_type "tv" means it is a TV series/show, NOT a movie. Call it a series or show.
+- media_type "movie" means it is a film. Call it a movie or film.
+- Never call a TV series a movie or vice versa.
+- If the data clearly shows a TV series, state that confidently — do not hedge or say
+  "it is assumed to be" or "there is no data confirming".
+
+CRITICAL — never hallucinate:
+- If the TMDB data is empty, has no results, or does not contain information relevant
+  to the question, say exactly: "I couldn't find this in the movie/TV database. Try
+  asking about a specific film or TV show title, actor, or director."
+- Do NOT answer from memory or training knowledge if the data is missing or irrelevant.
+- Do NOT invent ratings, awards, cast members, or any facts not present in the data.
+
+LINKS — always include a TMDB link for the main title(s) using the id and media_type fields:
+- Movie link format:  [View on TMDB](https://www.themoviedb.org/movie/{{id}})
+- TV link format:     [View on TMDB](https://www.themoviedb.org/tv/{{id}})
+- Person link format: [View on TMDB](https://www.themoviedb.org/person/{{id}})
+- Place the link inline next to the title, e.g. **Inception** ([TMDB](https://www.themoviedb.org/movie/27205))
+- Only include links for items that have an id field in the data.
 
 TMDB Data:
 {tmdb_data}
@@ -113,14 +145,20 @@ async def tmdb_agent_node(state: dict) -> dict:
     elif search_type == "discover":
         genre_name = (intent.get("genre") or "").lower()
         genre_id = _GENRE_MAP.get(genre_name)
-        tmdb_data = await tmdb_client.discover_movies(
+        discover_result = await tmdb_client.discover_movies(
             genre_id=genre_id,
             year=intent.get("year"),
             sort_by=intent.get("sort_by") or "vote_average.desc",
             min_rating=intent.get("min_rating") or 7.0,
         )
+        if not discover_result["results"]:
+            return {
+                "tmdb_result": "I couldn't find movies matching that criteria in the database.",
+                "_tmdb_raw": discover_result,
+            }
+        tmdb_data = discover_result
 
-    elif search_type == "movie_and_person":
+    elif search_type in ("movie_and_person", "title_and_person"):
         # Fetch movie details + person filmography in parallel
         movie_query  = intent.get("query") or question
         person_query = intent.get("person") or ""
@@ -168,26 +206,33 @@ async def tmdb_agent_node(state: dict) -> dict:
             "person_filmography": person_detail,
         }
 
-    else:  # search_movie (default)
+    else:  # search_title (default)
         query = intent.get("query") or question
         search_result = await tmdb_client.search_movies(query)
         tmdb_data = search_result
 
+        # Hard stop — no results means no LLM call
+        if not search_result["results"]:
+            return {
+                "tmdb_result": f"I couldn't find '{query}' in the movie/TV database. "
+                               f"Check the spelling or try a related title, actor, or director name.",
+                "_tmdb_raw": search_result,
+            }
+
         # If we got a specific movie, fetch its full details
-        if search_result["results"]:
-            top = search_result["results"][0]
-            if top.get("id"):
-                detail = await tmdb_client.get_movie_details(
-                    top["id"], top.get("media_type", "movie")
-                )
-                tmdb_data = {"search": search_result, "detail": detail}
+        top = search_result["results"][0]
+        if top.get("id"):
+            detail = await tmdb_client.get_movie_details(
+                top["id"], top.get("media_type", "movie")
+            )
+            tmdb_data = {"search": search_result, "detail": detail}
 
     # Step 3: Generate grounded answer
-    # movie_and_person queries carry more data — give the LLM more room
-    max_out = 1500 if search_type == "movie_and_person" else 1024
+    # title_and_person queries carry more data — give the LLM more room
+    max_out = 1500 if search_type in ("movie_and_person", "title_and_person") else 1024
     llm_answer = _get_llm(max_tokens=max_out)
     tmdb_text = json.dumps(tmdb_data, indent=2, default=str)
-    char_limit = 9000 if search_type == "movie_and_person" else 6000
+    char_limit = 9000 if search_type in ("movie_and_person", "title_and_person") else 6000
 
     answer_resp = await llm_answer.ainvoke([
         SystemMessage(content=_ANSWER_SYSTEM.format(tmdb_data=tmdb_text[:char_limit])),
