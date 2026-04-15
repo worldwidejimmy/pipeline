@@ -8,6 +8,7 @@ import { MetricsBar } from './components/MetricsBar'
 import { ChunksPanel } from './components/ChunksPanel'
 import { KnowledgeModal } from './components/KnowledgeModal'
 import { StatusModal } from './components/StatusModal'
+import { RoutingRulesModal } from './components/RoutingRulesModal'
 
 const EXAMPLE_QUERIES = [
   { icon: '🕵️', text: 'Show me good bank heist movies' },
@@ -45,6 +46,7 @@ export default function App() {
   const [errorBanner, setErrorBanner] = useState<{ code: string; message: string; detail?: string } | null>(null)
   const [showKnowledge, setShowKnowledge] = useState(false)
   const [showStatus,    setShowStatus]    = useState(false)
+  const [showRules,     setShowRules]     = useState(false)
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -52,7 +54,9 @@ export default function App() {
   }, [theme])
 
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') { setShowKnowledge(false); setShowStatus(false) } }
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setShowKnowledge(false); setShowStatus(false); setShowRules(false) }
+    }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [])
@@ -180,6 +184,9 @@ export default function App() {
       {/* ── Status modal ────────────────────────────────────────────────── */}
       {showStatus && <StatusModal onClose={() => setShowStatus(false)} />}
 
+      {/* ── Routing rules modal ─────────────────────────────────────────── */}
+      {showRules && <RoutingRulesModal onClose={() => setShowRules(false)} />}
+
       {/* ── Knowledge modal ─────────────────────────────────────────────── */}
       {showKnowledge && (
         <KnowledgeModal
@@ -223,7 +230,7 @@ export default function App() {
                 <span className="t-movie">Movie</span>
                 <span className="t-search">Search</span>
               </div>
-              <div className="header-tagline">AI-powered movie &amp; TV intelligence</div>
+              <div className="header-tagline">AI-powered Movie, TV &amp; Music search</div>
             </div>
           </div>
           <div className="header-right">
@@ -247,6 +254,14 @@ export default function App() {
               aria-label="Knowledge base"
             >
               📚
+            </button>
+            <button
+              className="header-icon-btn"
+              onClick={() => setShowRules(true)}
+              title="Routing rules & instructions"
+              aria-label="Routing rules"
+            >
+              🧭
             </button>
             <a
               className="header-icon-btn"
@@ -279,7 +294,7 @@ export default function App() {
         {/* Search hero */}
         <div className="query-section">
           <div className="query-label">
-            {history.length > 0 ? 'Follow-up question' : 'Ask about any movie or TV show'}
+            {history.length > 0 ? 'Follow-up question' : 'Ask about any movie, TV show, or music'}
           </div>
           <form className="query-form" onSubmit={handleSubmit}>
             <div className="query-input-wrap">
@@ -364,7 +379,7 @@ export default function App() {
             <div className="answer-placeholder">
               <div className="answer-placeholder-icon">🎬</div>
               <div className="answer-placeholder-text">
-                Ask anything about movies, TV shows, directors, or genres.
+                Ask anything about movies, TV shows, music, directors, or genres.
                 <br />
                 The AI pipeline searches TMDB, a knowledge base, and the web simultaneously.
               </div>

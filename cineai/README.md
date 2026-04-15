@@ -1,9 +1,11 @@
-# CineAI — Movie & TV Intelligence Platform
+# CineAI — Movie, TV & Music Intelligence Platform
 
 > **What a live LLM brings to movie discovery that no static database can.**
 
-A multi-agent RAG pipeline built with LangGraph, Groq, TMDB, and Milvus.
+A multi-agent RAG pipeline built with LangGraph, Groq, TMDB, Milvus, MusicBrainz, and optional Tavily.
 React + Vite frontend with a full LangSmith-style observability dashboard.
+
+**Operations handoff:** [../HANDOFF.md](../HANDOFF.md) (Ebert scrape, `/api/rules`, generated `data/`, deployment notes).
 
 ---
 
@@ -37,7 +39,7 @@ how a database tagged it 20 years ago.
 ### What the Pipeline Does for "Show me good bank heist movies"
 
 ```
-User query → Supervisor (routes to: tmdb + rag + search)
+User query → Supervisor (routes to: tmdb + rag + search [+ music when needed])
   │
   ├─▶ TMDB Agent
   │     • Extracts intent: genre=Crime/Thriller, sort=vote_average
@@ -83,6 +85,7 @@ filter UI can produce.
 │  /api/query → LangGraph astream_events() → SSE stream   │
 │  /api/trending → TMDB trending                          │
 │  /api/search  → TMDB quick search                       │
+│  /api/rules   → routing rules JSON (Rules modal)        │
 └────────────┬──────────────┬──────────────┬──────────────┘
              │              │              │
     ┌────────▼───┐  ┌───────▼──┐  ┌───────▼──────┐
@@ -94,7 +97,7 @@ filter UI can produce.
              │              │              │
     ┌────────▼──────────────▼──────────────▼──────┐
     │              Synthesiser Node                │
-    │     Groq LLaMA 3.1 70B (streaming)          │
+    │     Groq LLM (GROQ_MODEL in .env, streaming) │
     └─────────────────────────────────────────────┘
 ```
 
@@ -104,11 +107,11 @@ filter UI can produce.
 START → supervisor_route
            │
      routing decision
-     (tmdb|rag|search|tmdb+rag|tmdb+search|rag+search|all)
+     (tmdb|rag|search|music|tmdb+music|tmdb+rag|tmdb+search|rag+search|all)
            │
     ┌──────┼──────┐
     ▼      ▼      ▼
-  tmdb   rag  search   (parallel fan-out for multi-agent routing)
+  tmdb   rag  search (+ music agent when routed — not shown in ASCII)
     │      │      │
     └──────┴──────┘
            │
@@ -139,8 +142,9 @@ The backend transforms LangGraph's `astream_events()` into typed frontend events
 | Layer | Technology |
 |---|---|
 | Agent Orchestration | LangGraph StateGraph (async, streaming) |
-| LLM | Groq `llama-3.1-70b-versatile` — fast inference |
-| Movie Data | TMDB API (free tier) — real-time search, details, trending |
+| LLM | Groq — model from `GROQ_MODEL` in `.env` (e.g. `llama-3.1-8b-instant` for free tier) |
+| Movie / TV Data | TMDB API (free tier) — real-time search, details, trending |
+| Music Data | MusicBrainz (no key) |
 | RAG / Vector DB | Milvus (shared with pipeline project on :19530) |
 | Embeddings | OpenAI `text-embedding-3-small` |
 | Web Search | Tavily API (optional) |
@@ -191,6 +195,10 @@ Or point it at the pipeline project's corpus to reuse those docs:
 .venv/bin/python scripts/ingest.py /home/user/pipeline/docs/
 ```
 
+**Roger Ebert reviews** (optional, same Milvus collection): scrape to `backend/data/` then `python scripts/ingest_ebert.py` — see [../HANDOFF.md](../HANDOFF.md).
+
+**Routing rules in the UI:** header button opens the modal; data from `GET /api/rules`.
+
 ---
 
 ## Example Queries
@@ -237,7 +245,9 @@ routing decision · agents used.
 - [ ] RAGAS evaluation on recommendation quality
 - [ ] Ingest IMDb TSV datasets for richer RAG corpus
 - [ ] Semantic caching with Redis for repeated queries
-- [ ] Hybrid search (BM25 + dense) in Milvus for better title matching
+- [x] Hybrid search (BM25 + dense) in Milvus
+- [x] Music agent (MusicBrainz) and music routing
+- [x] Rules modal (`/api/rules`) and keyword overrides in supervisor
 
 ---
 
@@ -254,13 +264,21 @@ cineai/
 │   │   │   ├── tmdb_agent.py      Intent extraction → TMDB API → grounded answer
 │   │   │   ├── rag_agent.py       Milvus retrieval → citation-based answer
 │   │   │   ├── search_agent.py    Tavily web search → grounded answer
+│   │   │   ├── music_agent.py     MusicBrainz → grounded answer
 │   │   │   └── synthesiser.py     Merges all agent outputs → final answer
 │   │   ├── tools/
 │   │   │   ├── tmdb_client.py     Async TMDB API wrapper (search, discover, person)
 │   │   │   ├── milvus_retriever.py  Vector similarity search
+│   │   │   ├── musicbrainz_client.py MusicBrainz HTTP client
 │   │   │   └── web_search.py      Tavily wrapper with graceful degradation
 │   │   └── graph/
 │   │       └── pipeline.py        LangGraph StateGraph + conditional fan-out
+│   ├── docs/                      RAG markdown corpus
+│   ├── data/                      Generated scrape output (gitignored)
+│   ├── scripts/
+│   │   ├── ingest.py              Markdown/text → Milvus
+│   │   ├── scrape_ebert.py        Ebert via Wayback Machine
+│   │   └── ingest_ebert.py        Ebert JSONL → Milvus
 │   ├── requirements.txt
 │   └── .env.example
 ├── frontend/
@@ -270,6 +288,7 @@ cineai/
 │   │   ├── index.css              Dark theme design system
 │   │   └── components/
 │   │       ├── PipelineGraph.tsx  Animated node diagram
+│   │       ├── RoutingRulesModal.tsx  Supervisor rules from /api/rules
 │   │       ├── AgentTimeline.tsx  Gantt-style execution timeline
 │   │       ├── EventLog.tsx       Real-time typed event log
 │   │       ├── ChunksPanel.tsx    RAG chunks + TMDB movie cards
