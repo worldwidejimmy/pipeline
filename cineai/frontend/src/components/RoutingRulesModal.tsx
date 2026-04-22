@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { apiFetch } from '../api'
 
 interface Agent {
   id: string
@@ -37,7 +38,7 @@ export function RoutingRulesModal({ onClose }: Props) {
   const [tab, setTab]         = useState<Tab>('agents')
 
   useEffect(() => {
-    fetch('/api/rules')
+    apiFetch('/api/rules')
       .then(r => r.json())
       .then(d => { setData(d); setLoading(false) })
       .catch(() => setLoading(false))

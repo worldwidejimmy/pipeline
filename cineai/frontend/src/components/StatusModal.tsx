@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { apiFetch } from '../api'
 
 interface ServiceStatus {
   status: 'ok' | 'error' | 'rate_limited' | 'auth_error' | 'loading'
@@ -53,7 +54,7 @@ export function StatusModal({ onClose }: Props) {
 
   const load = () => {
     setLoading(true)
-    fetch('/api/status')
+    apiFetch('/api/status')
       .then(r => r.json())
       .then(d => { setData(d); setLoading(false); setRefreshed(new Date()) })
       .catch(() => setLoading(false))

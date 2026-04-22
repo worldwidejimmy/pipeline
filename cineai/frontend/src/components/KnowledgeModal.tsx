@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { apiFetch } from '../api'
 
 interface KnowledgeDoc {
   source: string
@@ -66,7 +67,7 @@ export function KnowledgeModal({ onClose, onSearch }: Props) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetch('/api/knowledge')
+    apiFetch('/api/knowledge')
       .then(r => r.json())
       .then(d => { setData(d); setLoading(false) })
       .catch(() => setLoading(false))
