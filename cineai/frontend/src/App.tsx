@@ -9,6 +9,8 @@ import { ChunksPanel } from './components/ChunksPanel'
 import { KnowledgeModal } from './components/KnowledgeModal'
 import { StatusModal } from './components/StatusModal'
 import { RoutingRulesModal } from './components/RoutingRulesModal'
+import { PasswordGate } from './components/PasswordGate'
+import { getAccessToken, apiFetch, makeSSEUrl } from './api'
 
 const EXAMPLE_QUERIES = [
   { icon: '🕵️', text: 'Show me good bank heist movies' },
@@ -31,6 +33,7 @@ function generateThreadId(): string {
 }
 
 export default function App() {
+  const [token, setToken]         = useState<string | null>(() => getAccessToken())
   const [query, setQuery]         = useState('')
   const [events, setEvents]       = useState<PipelineEvent[]>([])
   const [answer, setAnswer]       = useState('')
@@ -76,11 +79,12 @@ export default function App() {
   }, [history])
 
   useEffect(() => {
-    fetch('/api/trending')
-      .then(r => r.json())
+    if (!token) return
+    apiFetch('/api/trending')
+      .then(r => r.ok ? r.json() : Promise.reject())
       .then(d => setTrending(d.results?.slice(0, 6) ?? []))
       .catch(() => {})
-  }, [])
+  }, [token])
 
   const startNewConversation = useCallback(() => {
     esRef.current?.close()
@@ -102,7 +106,7 @@ export default function App() {
     setStream(true)
     setActiveTab('graph')
 
-    const url = `/api/query?q=${encodeURIComponent(q.trim())}&thread_id=${threadId}`
+    const url = makeSSEUrl(`/api/query?q=${encodeURIComponent(q.trim())}&thread_id=${threadId}`)
     const es = new EventSource(url)
     esRef.current = es
 
@@ -180,6 +184,9 @@ export default function App() {
 
   return (
     <div className="app">
+
+      {/* ── Password gate overlay ───────────────────────────────────────── */}
+      {!token && <PasswordGate onAuth={t => setToken(t)} />}
 
       {/* ── Status modal ────────────────────────────────────────────────── */}
       {showStatus && <StatusModal onClose={() => setShowStatus(false)} />}

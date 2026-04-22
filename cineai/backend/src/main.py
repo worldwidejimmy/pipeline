@@ -2,27 +2,45 @@
 CineAI FastAPI backend.
 
 Endpoints:
-  GET /api/query?q=<question>&thread_id=<id>  SSE stream (pipeline events + answer)
-  GET /api/history?thread_id=<id>             Conversation history for a thread
-  GET /api/trending                           Trending movies from TMDB
-  GET /api/search?q=<title>                   Quick TMDB title search
-  GET /api/rules                              Routing rules JSON (Rules modal)
-  GET /api/health                             Health check
+  POST /api/auth                              Validate preview password → session token
+  GET  /api/query?q=<question>&thread_id=<id> SSE stream (pipeline events + answer)
+  GET  /api/history?thread_id=<id>            Conversation history for a thread
+  GET  /api/trending                          Trending movies from TMDB
+  GET  /api/search?q=<title>                  Quick TMDB title search
+  GET  /api/rules                             Routing rules JSON (Rules modal)
+  GET  /api/health                            Health check
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from typing import AsyncIterator
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel
 
 from src.graph.pipeline import build_pipeline, CineState, _get_memory
 from src.tools import tmdb_client
 
 app = FastAPI(title="SmartMovieSearch", version="2.0.0")
+
+# ── Preview access gate ──────────────────────────────────────────────────────
+# Password is validated server-side; never exposed in the JS bundle.
+# The derived token is sent as X-Access-Token header (or ?_t= for EventSource).
+# Set PREVIEW_PASSWORD in backend/.env — do NOT hardcode here (public repo).
+import os as _os
+_PREVIEW_PASSWORD = _os.environ.get("PREVIEW_PASSWORD", "")
+_ACCESS_TOKEN     = hashlib.sha256(f"sms-gate:{_PREVIEW_PASSWORD}".encode()).hexdigest()
+
+_CORS_ORIGINS = [
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+    "https://smartmoviesearch.com",
+    "https://www.smartmoviesearch.com",
+]
 
 # ── In-memory rate-limit tracker ────────────────────────────────────────────
 # Set whenever a pipeline call hits a Groq 429; cleared when status ping succeeds.
@@ -30,15 +48,36 @@ _groq_rate_limit: dict | None = None   # {"message": str, "retry_in": str, "at":
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5174",
-        "http://127.0.0.1:5174",
-        "https://smartmoviesearch.com",
-        "https://www.smartmoviesearch.com",
-    ],
+    allow_origins=_CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def access_gate(request: Request, call_next):
+    """Block unauthenticated requests to all /api/ routes except /api/auth and /api/health.
+    Allows CORS OPTIONS preflight through unconditionally."""
+    path   = request.url.path
+    method = request.method
+
+    # Always let CORS preflight and public endpoints through
+    if method == "OPTIONS" or path in ("/api/auth", "/api/health"):
+        return await call_next(request)
+
+    if path.startswith("/api/"):
+        token = (
+            request.headers.get("X-Access-Token")
+            or request.query_params.get("_t")
+        )
+        if token != _ACCESS_TOKEN:
+            # Include CORS header so the browser sees 401, not a CORS error
+            origin = request.headers.get("origin", "")
+            headers = {"Access-Control-Allow-Origin": origin} if origin in _CORS_ORIGINS else {}
+            return JSONResponse({"detail": "Unauthorized"}, status_code=401, headers=headers)
+
+    return await call_next(request)
+
 
 _AGENT_NODES = {
     "supervisor_route", "tmdb_agent", "rag_agent", "search_agent", "music_agent", "synthesise"
@@ -451,6 +490,17 @@ async def get_routing_rules():
         },
         "llm_rules": list(SUPERVISOR_LLM_RULE_BULLETS),
     }
+
+
+class _AuthRequest(BaseModel):
+    password: str
+
+@app.post("/api/auth")
+async def authenticate(body: _AuthRequest):
+    """Validate the preview password and return a session access token."""
+    if body.password == _PREVIEW_PASSWORD:
+        return {"token": _ACCESS_TOKEN}
+    raise HTTPException(status_code=401, detail="Invalid password")
 
 
 @app.get("/api/health")

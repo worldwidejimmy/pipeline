@@ -1570,6 +1570,197 @@ html, body, #root {
   background: rgba(109, 40, 217, 0.08);
 }
 
+/* ── Password Gate ───────────────────────────────────────────────────────────── */
+
+/* Full-screen frosted-glass overlay — the real app renders behind this */
+.pg-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* blur + dim everything behind the overlay */
+  backdrop-filter: blur(12px) brightness(0.55) saturate(0.7);
+  -webkit-backdrop-filter: blur(12px) brightness(0.55) saturate(0.7);
+  /* subtle radial vignette on top of the blur */
+  background: radial-gradient(ellipse 120% 100% at 50% 50%,
+    rgba(6, 6, 14, 0.35) 0%,
+    rgba(6, 6, 14, 0.65) 100%
+  );
+}
+
+.pg-card {
+  background: rgba(14, 14, 28, 0.92);
+  border: 1px solid var(--border-lit);
+  border-radius: var(--radius-xl);
+  box-shadow:
+    0 0 0 1px rgba(99, 102, 241, 0.12),
+    0 8px 40px rgba(0, 0, 0, 0.7),
+    0 0 80px rgba(99, 102, 241, 0.06);
+  padding: 2.5rem 2.25rem 2rem;
+  width: min(420px, calc(100vw - 2rem));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  animation: pg-fade-in 0.35s ease;
+}
+
+@keyframes pg-fade-in {
+  from { opacity: 0; transform: translateY(16px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0)   scale(1); }
+}
+
+@keyframes pg-shake {
+  0%, 100% { transform: translateX(0); }
+  20%       { transform: translateX(-8px); }
+  40%       { transform: translateX(8px); }
+  60%       { transform: translateX(-6px); }
+  80%       { transform: translateX(6px); }
+}
+
+.pg-shake { animation: pg-shake 0.45s ease; }
+
+.pg-logo {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.25rem;
+}
+.pg-logo-icon { font-size: 1.75rem; line-height: 1; }
+.pg-logo-text { font-size: 1.2rem; font-weight: 700; letter-spacing: -0.02em; }
+
+.pg-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+}
+
+.pg-subtitle {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1.5;
+  max-width: 300px;
+  margin: 0;
+}
+
+.pg-form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.pg-input-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.pg-input {
+  width: 100%;
+  padding: 0.75rem 2.75rem 0.75rem 1rem;
+  background: var(--surface3);
+  border: 1px solid var(--border-lit);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 0.95rem;
+  font-family: var(--font-sans);
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.pg-input:focus {
+  border-color: var(--indigo);
+  box-shadow: 0 0 0 3px var(--indigo-glow);
+}
+.pg-input:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.pg-show-btn {
+  position: absolute;
+  right: 0.65rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.25rem;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+.pg-show-btn:hover { opacity: 1; }
+
+.pg-error {
+  font-size: 0.82rem;
+  color: var(--red);
+  text-align: center;
+  margin: 0;
+}
+
+.pg-submit {
+  width: 100%;
+  padding: 0.75rem;
+  background: linear-gradient(135deg, var(--indigo), #4f46e5);
+  border: none;
+  border-radius: var(--radius);
+  color: #fff;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s, box-shadow 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+}
+.pg-submit:hover:not(:disabled) {
+  opacity: 0.9;
+  box-shadow: 0 4px 20px rgba(99, 102, 241, 0.4);
+}
+.pg-submit:active:not(:disabled) { transform: scale(0.98); }
+.pg-submit:disabled { opacity: 0.4; cursor: not-allowed; }
+
+@keyframes pg-spin {
+  to { transform: rotate(360deg); }
+}
+.pg-spinner {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: pg-spin 0.7s linear infinite;
+}
+
+.pg-hint {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  text-align: center;
+  margin-top: 0.25rem;
+}
+
+/* Light theme adjustments */
+:root[data-theme="light"] .pg-overlay {
+  backdrop-filter: blur(14px) brightness(0.75) saturate(0.8);
+  -webkit-backdrop-filter: blur(14px) brightness(0.75) saturate(0.8);
+  background: radial-gradient(ellipse 120% 100% at 50% 50%,
+    rgba(244, 243, 239, 0.4) 0%,
+    rgba(200, 196, 188, 0.6) 100%
+  );
+}
+:root[data-theme="light"] .pg-card {
+  background: rgba(255, 255, 255, 0.96);
+  border-color: var(--border);
+  box-shadow:
+    0 0 0 1px rgba(99, 102, 241, 0.08),
+    0 8px 40px rgba(0, 0, 0, 0.14);
+}
+
 /* ── Responsive ─────────────────────────────────────────────────────────────── */
 @media (max-width: 900px) {
   .app {
