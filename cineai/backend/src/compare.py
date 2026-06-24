@@ -16,9 +16,8 @@ import time
 from typing import AsyncIterator
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_groq import ChatGroq
 
-from src.config import get_config
+from src.llm import get_chat
 from src.tools.milvus_retriever import retrieve
 from src import usage
 
@@ -44,18 +43,11 @@ def _sse(event_type: str, payload: dict) -> str:
     return f"event: {event_type}\ndata: {json.dumps(payload)}\n\n"
 
 
-def _llm() -> ChatGroq:
-    cfg = get_config()
-    return ChatGroq(
-        model=cfg.groq_model,
-        temperature=0.1,
-        api_key=cfg.groq_api_key,
-        max_tokens=900,
-        streaming=True,
-    )
+def _llm():
+    return get_chat(temperature=0.1, max_tokens=900, streaming=True)
 
 
-async def compare_stream(question: str) -> AsyncIterator[str]:
+async def compare_stream(question: str, ip: str | None = None) -> AsyncIterator[str]:
     """Stream both grounded and ungrounded answers concurrently as SSE events.
 
     Events:
@@ -129,7 +121,7 @@ async def compare_stream(question: str) -> AsyncIterator[str]:
 
     await asyncio.gather(*tasks, return_exceptions=True)
 
-    usage.add_tokens(totals["prompt"], totals["completion"])
+    usage.add_tokens(totals["prompt"], totals["completion"], ip=ip)
     yield _sse("compare_done", {
         "total_prompt_tokens":     totals["prompt"],
         "total_completion_tokens": totals["completion"],

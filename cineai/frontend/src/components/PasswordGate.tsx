@@ -107,7 +107,7 @@ export function PasswordGate({ onAuth, onClose, reason }: Props) {
         </form>
 
         <p className="pg-hint">
-          AI-powered movie, TV &amp; music search — built on LangGraph + Groq
+          AI-powered movie, TV &amp; music search — built on LangGraph + Claude
         </p>
       </div>
     </div>

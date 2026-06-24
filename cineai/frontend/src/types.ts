@@ -123,6 +123,25 @@ export interface Usage {
   token_budget: number;
 }
 
+// ── Admin ─────────────────────────────────────────────────────────────────────
+
+export interface AdminIpRow {
+  ip: string;
+  requests: number;
+  tokens: number;
+  last_seen: number;
+  blacklisted: boolean;
+}
+
+export interface AdminUsage {
+  day: string;
+  total_tokens: number;
+  free_limit: number;
+  window_seconds: number;
+  ips: AdminIpRow[];
+  blacklist: string[];
+}
+
 // ── RAG-vs-no-RAG compare ─────────────────────────────────────────────────────
 
 export type CompareSide = 'rag' | 'base';
