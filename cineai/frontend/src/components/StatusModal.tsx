@@ -12,8 +12,8 @@ interface ServiceStatus {
 }
 
 interface StatusData {
-  keys: { groq: boolean; openai: boolean; tmdb: boolean; tavily: boolean }
-  groq: ServiceStatus
+  keys: { anthropic: boolean; openai: boolean; tmdb: boolean; tavily: boolean }
+  anthropic: ServiceStatus
   milvus: ServiceStatus
   tmdb: ServiceStatus
 }
@@ -97,28 +97,28 @@ export function StatusModal({ onClose }: Props) {
               <div className="status-section-label">Services</div>
               <div className="status-rows">
 
-                {/* Groq */}
+                {/* Claude */}
                 <div className="status-row">
-                  <StatusDot status={data.groq.status} />
+                  <StatusDot status={data.anthropic.status} />
                   <div className="status-row-info">
-                    <span className="status-row-name">Groq LLM</span>
+                    <span className="status-row-name">Claude LLM</span>
                     <span className="status-row-detail">
-                      {data.groq.model}
-                      {data.groq.latency_ms !== undefined && (
-                        <span className="status-latency">{fmtLatency(data.groq.latency_ms)}</span>
+                      {data.anthropic.model}
+                      {data.anthropic.latency_ms !== undefined && (
+                        <span className="status-latency">{fmtLatency(data.anthropic.latency_ms)}</span>
                       )}
                     </span>
                   </div>
-                  {data.groq.status === 'rate_limited' ? (
+                  {data.anthropic.status === 'rate_limited' ? (
                     <div style={{ textAlign: 'right' }}>
                       <StatusBadge status="rate_limited" text="rate limited" />
-                      {data.groq.retry_in && (
-                        <div className="status-retry">retry in {data.groq.retry_in}</div>
+                      {data.anthropic.retry_in && (
+                        <div className="status-retry">retry in {data.anthropic.retry_in}</div>
                       )}
                     </div>
                   ) : (
-                    <StatusBadge status={data.groq.status}
-                      text={data.groq.status === 'ok' ? 'online' : data.groq.status} />
+                    <StatusBadge status={data.anthropic.status}
+                      text={data.anthropic.status === 'ok' ? 'online' : data.anthropic.status} />
                   )}
                 </div>
 
@@ -161,22 +161,22 @@ export function StatusModal({ onClose }: Props) {
               {/* API Keys */}
               <div className="status-section-label" style={{ marginTop: 24 }}>API Keys</div>
               <div className="key-grid">
-                <KeyRow label="Groq"   present={data.keys.groq} />
+                <KeyRow label="Anthropic"   present={data.keys.anthropic} />
                 <KeyRow label="OpenAI" present={data.keys.openai} />
                 <KeyRow label="TMDB"   present={data.keys.tmdb} />
                 <KeyRow label="Tavily" present={data.keys.tavily} />
               </div>
 
               {/* Info box for rate limit */}
-              {data.groq.status === 'rate_limited' && (
+              {data.anthropic.status === 'rate_limited' && (
                 <div className="status-info-box">
-                  <strong>⏳ Groq free-tier daily quota reached.</strong>
+                  <strong>⏳ Claude API rate limit reached.</strong>
                   <br />
                   The 100k tokens/day limit resets on a rolling 24-hour window.
-                  {data.groq.retry_in && <> Try again in <strong>{data.groq.retry_in}</strong>.</>}
+                  {data.anthropic.retry_in && <> Try again in <strong>{data.anthropic.retry_in}</strong>.</>}
                   {' '}To remove this limit, upgrade at{' '}
-                  <a href="https://console.groq.com/settings/billing" target="_blank" rel="noopener noreferrer">
-                    console.groq.com
+                  <a href="https://console.anthropic.com/settings/billing" target="_blank" rel="noopener noreferrer">
+                    console.anthropic.com
                   </a>.
                 </div>
               )}

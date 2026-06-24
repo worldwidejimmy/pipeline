@@ -12,7 +12,7 @@ import asyncio
 import json
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_groq import ChatGroq
+from src.llm import get_chat
 
 from src.config import get_config
 from src.tools import tmdb_client
@@ -96,15 +96,8 @@ _GENRE_MAP = {
 }
 
 
-def _get_llm(max_tokens: int = 1024) -> ChatGroq:
-    cfg = get_config()
-    return ChatGroq(
-        model=cfg.groq_model,
-        temperature=0.1,
-        api_key=cfg.groq_api_key,
-        max_tokens=max_tokens,
-        streaming=True,
-    )
+def _get_llm(max_tokens: int = 1024):
+    return get_chat(temperature=0.1, max_tokens=max_tokens, streaming=True)
 
 
 async def tmdb_agent_node(state: dict) -> dict:

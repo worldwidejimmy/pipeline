@@ -134,7 +134,7 @@ export function RoutingRulesModal({ onClose }: Props) {
                 <div>
                   <p className="rules-intro">
                     <strong>Checked before the LLM</strong> — if any of these words appear in
-                    the query, the route is forced immediately without calling Groq.
+                    the query, the route is forced immediately without calling Claude.
                     Zero latency, 100% reliable.
                   </p>
 

@@ -1950,3 +1950,45 @@ html, body, #root {
 .cmp-source-name { font-family: var(--font-mono); font-size: 11px; color: var(--blue); }
 .cmp-source-score { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
 .cmp-source-text { font-size: 11px; color: var(--text-muted); line-height: 1.5; }
+
+/* ── Admin modal ───────────────────────────────────────────────────────────── */
+.admin-error { color: var(--red); font-size: 13px; padding: 10px 0; }
+.admin-section-label {
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--text-muted); margin: 14px 0 8px;
+}
+.admin-blacklist { margin-bottom: 6px; }
+.admin-chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.admin-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono); font-size: 11px;
+  padding: 3px 8px; border-radius: 999px;
+  background: color-mix(in srgb, var(--red) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--red) 45%, transparent);
+  color: var(--text);
+}
+.admin-chip button { border: none; background: none; color: var(--text-muted); cursor: pointer; font-size: 11px; padding: 0; }
+.admin-chip button:hover { color: var(--red); }
+
+.admin-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.admin-table th {
+  text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--text-muted); padding: 6px 8px; border-bottom: 1px solid var(--border);
+}
+.admin-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.admin-ip { font-family: var(--font-mono); font-size: 11px; }
+.admin-dim { color: var(--text-muted); }
+.admin-empty { text-align: center; color: var(--text-muted); padding: 16px; }
+.admin-row-blocked { opacity: 0.55; }
+.admin-btn {
+  font-size: 11px; padding: 3px 8px; border-radius: 6px; cursor: pointer;
+  background: var(--surface3); border: 1px solid var(--border-lit); color: var(--text);
+}
+.admin-btn:hover { border-color: var(--indigo); }
+.admin-btn--danger:hover { border-color: var(--red); color: var(--red); }
+.admin-btn:disabled { opacity: 0.5; cursor: default; }
+.admin-refresh {
+  margin-top: 12px; font-size: 12px; padding: 6px 12px; border-radius: var(--radius);
+  background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted); cursor: pointer;
+}
+.admin-refresh:hover { color: var(--text); border-color: var(--border-lit); }

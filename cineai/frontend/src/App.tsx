@@ -11,6 +11,7 @@ import { StatusModal } from './components/StatusModal'
 import { RoutingRulesModal } from './components/RoutingRulesModal'
 import { PasswordGate } from './components/PasswordGate'
 import { UsageBadge } from './components/UsageBadge'
+import { AdminModal } from './components/AdminModal'
 import { CompareView } from './components/CompareView'
 import { getAccessToken, clearAccessToken, apiFetch, makeSSEUrl, fetchUsage } from './api'
 
@@ -57,6 +58,7 @@ export default function App() {
   const [usage,      setUsage]      = useState<Usage | null>(null)
   const [showSignIn, setShowSignIn] = useState(false)
   const [signInReason, setSignInReason] = useState<string | undefined>(undefined)
+  const [showAdmin,  setShowAdmin]  = useState(false)
 
   // RAG-vs-no-RAG compare mode
   const [compareMode,  setCompareMode]  = useState(false)
@@ -78,7 +80,7 @@ export default function App() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { setShowKnowledge(false); setShowStatus(false); setShowRules(false) }
+      if (e.key === 'Escape') { setShowKnowledge(false); setShowStatus(false); setShowRules(false); setShowAdmin(false) }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
@@ -303,6 +305,9 @@ export default function App() {
         />
       )}
 
+      {/* ── Admin modal ─────────────────────────────────────────────────── */}
+      {showAdmin && <AdminModal onClose={() => setShowAdmin(false)} />}
+
       {/* ── Status modal ────────────────────────────────────────────────── */}
       {showStatus && <StatusModal onClose={() => setShowStatus(false)} />}
 
@@ -357,6 +362,16 @@ export default function App() {
           </div>
           <div className="header-right">
             <UsageBadge usage={usage} onSignIn={() => openSignIn()} onSignOut={handleSignOut} />
+            {usage?.unlimited && (
+              <button
+                className="header-icon-btn"
+                onClick={() => setShowAdmin(true)}
+                title="Admin — usage & abuse"
+                aria-label="Admin"
+              >
+                🛡️
+              </button>
+            )}
             {history.length > 0 && (
               <span className="header-turns">
                 {history.length} turn{history.length !== 1 ? 's' : ''}

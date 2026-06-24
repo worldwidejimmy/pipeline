@@ -5,7 +5,7 @@ coherent answer. Maintains conversation history in state.
 from __future__ import annotations
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_groq import ChatGroq
+from src.llm import get_chat
 
 from src.config import get_config
 
@@ -39,15 +39,8 @@ don't repeat information already covered in the conversation history unless the 
 """
 
 
-def _get_llm() -> ChatGroq:
-    cfg = get_config()
-    return ChatGroq(
-        model=cfg.groq_model,
-        temperature=0.2,
-        api_key=cfg.groq_api_key,
-        max_tokens=1200,
-        streaming=True,
-    )
+def _get_llm():
+    return get_chat(temperature=0.2, max_tokens=1200, streaming=True)
 
 
 async def synthesise_node(state: dict) -> dict:

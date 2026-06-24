@@ -6,7 +6,7 @@ questions so routing stays coherent across turns.
 from __future__ import annotations
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_groq import ChatGroq
+from src.llm import get_chat
 
 from src.config import get_config
 
@@ -63,14 +63,8 @@ The user's new question may be a follow-up to the above.
 """
 
 
-def _get_llm() -> ChatGroq:
-    cfg = get_config()
-    return ChatGroq(
-        model=cfg.groq_model,
-        temperature=0,
-        api_key=cfg.groq_api_key,
-        max_tokens=16,
-    )
+def _get_llm():
+    return get_chat(temperature=0, max_tokens=16)
 
 
 # Keyword patterns that deterministically force a routing decision,
