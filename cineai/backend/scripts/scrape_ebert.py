@@ -21,6 +21,7 @@ import argparse
 import json
 import re
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -68,30 +69,46 @@ def _cdx_one_year(client: httpx.Client, year: int) -> dict[str, str]:
     return result
 
 
-def fetch_cdx_urls() -> dict[str, str]:
+def fetch_cdx_urls(refresh_recent: int = 0) -> dict[str, str]:
     """
-    Return {normalized_url: best_timestamp} — loads from cache if available,
-    otherwise queries CDX API year-by-year and saves the result to disk.
+    Return {normalized_url: best_timestamp}.
+
+    With no cache, queries CDX year-by-year from 2013 → current year and saves it.
+    With a cache present and refresh_recent=0, returns the cache unchanged.
+    With refresh_recent=N, re-queries CDX for the last N calendar years and merges
+    the results into the cache — this is how the nightly job discovers reviews that
+    were archived since the last run.
     """
+    current_year = datetime.now(timezone.utc).year
+    url_map: dict[str, str] = {}
+    cached = False
+
     if URLS_FILE.exists():
         print(f"Loading cached URL list from {URLS_FILE}…")
         with URLS_FILE.open() as f:
             url_map = json.load(f)
         print(f"  {len(url_map)} URLs loaded from cache")
-        return url_map
+        cached = True
+        if not refresh_recent:
+            return url_map
 
-    print("Querying Wayback Machine CDX API (one year at a time)…")
-    url_map: dict[str, str] = {}
+    if cached and refresh_recent:
+        years = range(current_year - refresh_recent + 1, current_year + 1)
+        print(f"Refreshing CDX for recent years {list(years)}…")
+    else:
+        years = range(2013, current_year + 1)
+        print("Querying Wayback Machine CDX API (one year at a time)…")
 
+    before = len(url_map)
     with httpx.Client() as client:
-        for year in range(2013, 2026):
+        for year in years:
             year_map = _cdx_one_year(client, year)
             new = sum(1 for k in year_map if k not in url_map)
             url_map.update(year_map)
             print(f"  {year}: +{new} new (total {len(url_map)})")
             time.sleep(1.0)
 
-    print(f"CDX done — {len(url_map)} unique review URLs")
+    print(f"CDX done — {len(url_map)} unique review URLs ({len(url_map) - before} new this pass)")
     URLS_FILE.parent.mkdir(parents=True, exist_ok=True)
     with URLS_FILE.open("w") as f:
         json.dump(url_map, f)
@@ -196,6 +213,9 @@ def main() -> None:
                         help="Max new reviews to scrape (0 = all)")
     parser.add_argument("--reset", action="store_true",
                         help="Delete existing JSONL and restart")
+    parser.add_argument("--refresh-recent", type=int, default=0, metavar="N",
+                        help="Re-query CDX for the last N years to discover newly "
+                             "archived reviews (use in the nightly cron, e.g. 1)")
     args = parser.parse_args()
 
     OUT_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -215,7 +235,7 @@ def main() -> None:
                     pass
         print(f"Resuming: {len(done)} reviews already saved")
 
-    url_map = fetch_cdx_urls()
+    url_map = fetch_cdx_urls(refresh_recent=args.refresh_recent)
     with httpx.Client() as client:
         todo    = [(u, ts) for u, ts in url_map.items() if u not in done]
 

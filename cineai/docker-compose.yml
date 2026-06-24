@@ -82,7 +82,8 @@ services:
     environment:
       MILVUS_URI: http://milvus:19530   # override to use internal service name
     volumes:
-      - ./backend/docs:/app/docs:ro    # mount corpus for ingest
+      - ./backend/docs:/app/docs:ro    # mount markdown corpus for ingest
+      - ./backend/data:/app/data       # scraped reviews (jsonl) for ingest_ebert
     depends_on:
       milvus: { condition: service_healthy }
     healthcheck:
