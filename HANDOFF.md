@@ -7,7 +7,7 @@ This document is for anyone taking over the **movie, TV, and music** multi-agent
 ## What this product is
 
 - **Frontend:** React (Vite), SSE client, observability panels (graph, timeline, events, RAG chunks).
-- **Backend:** FastAPI, LangGraph pipeline, Groq LLM, Milvus hybrid RAG (BM25 + dense), TMDB, optional Tavily, MusicBrainz (no key).
+- **Backend:** FastAPI, LangGraph pipeline, **Anthropic Claude** LLM (Haiku/Sonnet/Opus via `src/llm.py`), Milvus hybrid RAG (BM25 + dense), TMDB, optional Tavily, MusicBrainz (no key).
 - **Deployment:** Docker Compose in `cineai/docker-compose.yml`; production site referenced from root README.
 
 ---
@@ -86,10 +86,17 @@ The site is **public** — no password wall. `src/usage.py` enforces:
 
 - **Anonymous:** `FREE_REQUESTS_PER_WINDOW` (default **3**) searches per **`FREE_WINDOW_SECONDS`** (default **3600s / 1h**) per IP. Over limit → `/api/query` and `/api/compare` emit a `pipeline_error` SSE with `code: "ip_limit"` (frontend opens the sign-in modal).
 - **Signed in:** the old `PREVIEW_PASSWORD` now grants **unlimited** access (token via `POST /api/auth`, sent as `X-Access-Token` / `?_t=`). Leaving `PREVIEW_PASSWORD` blank means *no one* can unlock unlimited.
-- **Token meter:** daily Groq token usage is accumulated server-side (Groq's API doesn't expose the daily figure) and exposed at **`GET /api/usage`** alongside the caller's remaining free credits. `GROQ_DAILY_TOKEN_BUDGET` (default 100000) sets the meter's denominator.
+- **Token meter:** cumulative Claude tokens used **today by everyone** (your paid spend), accumulated server-side and exposed at **`GET /api/usage`** alongside the caller's remaining free credits. `DAILY_TOKEN_BUDGET` (default 0 = no cap) optionally sets a meter denominator.
 - **Real client IP:** read from `CF-Connecting-IP` (Cloudflare), then `X-Forwarded-For[0]`. **Do not** trust `X-Real-IP` — the frontend-container nginx overwrites it with the docker gateway.
 
-Counters are in-memory (reset on backend redeploy) — fine for this scale; swap for Redis/sqlite if you need persistence.
+Most counters are in-memory (reset on backend redeploy); the **IP blacklist** persists to `data/ip_blacklist.json` (volume-mounted).
+
+### Abuse controls + admin
+
+- **Bot protection (lightweight):** `/api/query` and `/api/compare` reject empty / known-library User-Agents and present-but-foreign `Origin`/`Referer` (`_looks_like_bot` in `main.py`). Signed-in callers bypass it. Cloudflare **Turnstile** is the intended stronger layer — not yet wired.
+- **IP blacklist:** `usage.is_blacklisted` blocks at `consume()`; manage via the admin screen.
+- **Auth lockout:** `/api/auth` locks an IP after `AUTH_MAX_FAILS` (5) failures for `AUTH_LOCKOUT_SECONDS` (900s).
+- **Admin screen** (🛡️, header — visible only when signed in): `GET /api/admin/usage` (per-IP requests + tokens today) and `POST /api/admin/blacklist` ({ip, action}). Both gated by the access token (`usage.is_unlimited`).
 
 `GET /api/compare?q=` answers the same question twice (grounded on Milvus chunks vs. bare model) and streams both via `compare_token {side}` / `compare_side_end` / `compare_done` events. Costs **one** free credit despite two LLM calls.
 
@@ -104,7 +111,7 @@ Counters are in-memory (reset on backend redeploy) — fine for this scale; swap
 ## Configuration and operations
 
 - **Env:** `cineai/backend/.env` (see `.env.example`). Not committed.
-- **Groq model:** Prefer a smaller/faster model on free tier (e.g. `llama-3.1-8b-instant`) to reduce rate limits; set `GROQ_MODEL` in `.env`. After `.env` changes, recreate containers: `docker compose up -d --force-recreate backend`.
+- **Model tier:** set `DEFAULT_MODEL_TIER` (`haiku` | `sonnet` | `opus`) in `.env`; one server-wide setting changes every agent (`src/llm.py`). Haiku is default (cheapest/fastest). `ANTHROPIC_API_KEY` required. After `.env` changes, recreate: `docker compose up -d --force-recreate backend`. **Opus tier:** the factory omits `temperature` (Opus 4.8 rejects sampling params with a 400).
 - **Frontend text/build:** Static assets are baked into the frontend image; after UI changes run `docker compose build frontend` (or your CI equivalent), not only `up -d`.
 - **LangSmith:** Optional tracing via `LANGCHAIN_TRACING_V2`, `LANGCHAIN_API_KEY`, `LANGCHAIN_PROJECT`.
 

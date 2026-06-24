@@ -14,19 +14,24 @@ function fmt(n: number): string {
 export function UsageBadge({ usage, onSignIn, onSignOut }: Props) {
   if (!usage) return null
 
-  const pct = usage.token_budget
+  const hasBudget = usage.token_budget > 0
+  const pct = hasBudget
     ? Math.min(100, Math.round((usage.tokens_used_today / usage.token_budget) * 100))
     : 0
   const meterColor = pct >= 90 ? 'var(--red)' : pct >= 70 ? 'var(--amber)' : 'var(--indigo)'
 
   return (
-    <div className="usage-badge" title="Daily Groq free-tier token budget (shared by all visitors)">
+    <div className="usage-badge" title="Total Claude tokens used today across all visitors">
       {/* Token meter */}
       <div className="usage-tokens">
-        <span className="usage-tokens-label">🔢 {fmt(usage.tokens_used_today)} / {fmt(usage.token_budget)}</span>
-        <div className="usage-meter">
-          <div className="usage-meter-fill" style={{ width: `${pct}%`, background: meterColor }} />
-        </div>
+        <span className="usage-tokens-label">
+          🔢 {fmt(usage.tokens_used_today)}{hasBudget ? ` / ${fmt(usage.token_budget)}` : ' tokens today'}
+        </span>
+        {hasBudget && (
+          <div className="usage-meter">
+            <div className="usage-meter-fill" style={{ width: `${pct}%`, background: meterColor }} />
+          </div>
+        )}
       </div>
 
       {/* Quota / sign-in */}
