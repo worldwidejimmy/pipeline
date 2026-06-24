@@ -30,6 +30,16 @@ IN_FILE = Path(__file__).parent.parent / "data" / "ebert_reviews.jsonl"
 
 CHUNK_SIZE    = 900   # slightly larger for reviews — full paragraphs read better
 CHUNK_OVERLAP = 120
+EMBED_BATCH   = 256   # chunks embedded+inserted per batch (keeps peak memory low)
+
+
+def norm_slug(source_or_slug: str) -> str:
+    """Canonical review key — strips the ebert/ and amp/ prefixes so that the
+    AMP mirror (ebert/amp/foo) and the canonical page (ebert/foo) collapse to the
+    same key. This is what keeps re-ingests (incl. the nightly cron) from
+    reintroducing the duplicate-mirror problem."""
+    s = source_or_slug.removeprefix("ebert/").removeprefix("amp/")
+    return s.rstrip("/")
 
 
 def format_review(review: dict) -> str:
@@ -87,18 +97,30 @@ def main() -> None:
     ensure_collection(client, cfg, reset=False)
 
     # Optionally find already-ingested sources
-    existing_sources: set[str] = set()
+    # seen_slugs holds canonical review keys already present (or seen this run).
+    # Comparing on the normalized slug dedupes amp mirrors against canonical pages.
+    seen_slugs: set[str] = set()
     if args.skip_existing:
         print("Checking existing sources in Milvus…")
         try:
-            rows = client.query(
+            # Milvus caps a single query window at 16,384 rows, so paginate with
+            # an iterator — the corpus is far larger than that.
+            it = client.query_iterator(
                 cfg.milvus_collection,
                 filter='source like "ebert/%"',
                 output_fields=["source"],
-                limit=100_000,
+                batch_size=16_000,
             )
-            existing_sources = {r["source"] for r in rows}
-            print(f"  {len(existing_sources)} Ebert chunks already present")
+            chunks_seen = 0
+            while True:
+                batch = it.next()
+                if not batch:
+                    it.close()
+                    break
+                chunks_seen += len(batch)
+                seen_slugs.update(norm_slug(r["source"]) for r in batch)
+            print(f"  {chunks_seen} Ebert chunks already present "
+                  f"({len(seen_slugs)} distinct reviews)")
         except Exception as e:
             print(f"  Could not query existing: {e}")
 
@@ -124,12 +146,14 @@ def main() -> None:
 
     skipped = 0
     for review in reviews:
-        slug = review.get("url", "").split("/reviews/")[-1].rstrip("/") or review.get("title", "unknown")
-        source = f"ebert/{slug}"
+        raw_slug = review.get("url", "").split("/reviews/")[-1].rstrip("/")
+        slug = norm_slug(raw_slug) or review.get("title", "unknown")
+        source = f"ebert/{slug}"   # always canonical form, never ebert/amp/…
 
-        if source in existing_sources:
+        if slug in seen_slugs:   # already in Milvus, or an amp/canonical twin this run
             skipped += 1
             continue
+        seen_slugs.add(slug)
 
         full_text = format_review(review)
         chunks    = splitter.split_text(full_text)
@@ -145,24 +169,32 @@ def main() -> None:
         print("Nothing to insert.")
         return
 
-    # Embed in batches
-    print(f"\nEmbedding via OpenAI text-embedding-3-small…")
-    dense_vecs = embedder.embed_documents(all_texts)
-
-    # Insert in batches
-    rows = [
-        {"text": text, "dense_vector": vec, "source": source}
-        for text, vec, source in zip(all_texts, dense_vecs, all_sources)
-    ]
-
+    # Embed + insert in bounded batches so peak memory stays flat (important on
+    # a small shared host — embedding ~150k vectors at once would OOM the box).
+    # Each batch is embedded then immediately inserted and freed; a failed batch
+    # is logged and skipped rather than losing the whole run.
+    print(f"\nEmbedding + inserting via OpenAI text-embedding-3-small (batches of {EMBED_BATCH})…")
+    total = len(all_texts)
     inserted = 0
-    for i in range(0, len(rows), BATCH_SIZE):
-        batch = rows[i : i + BATCH_SIZE]
-        client.insert(cfg.milvus_collection, batch)
-        inserted += len(batch)
-        print(f"  Inserted {inserted}/{len(rows)}", end="\r")
+    failed = 0
+    for i in range(0, total, EMBED_BATCH):
+        texts   = all_texts[i : i + EMBED_BATCH]
+        sources = all_sources[i : i + EMBED_BATCH]
+        try:
+            vecs = embedder.embed_documents(texts)
+            rows = [
+                {"text": t, "dense_vector": v, "source": s}
+                for t, v, s in zip(texts, vecs, sources)
+            ]
+            client.insert(cfg.milvus_collection, rows)
+            inserted += len(rows)
+        except Exception as e:
+            failed += len(texts)
+            print(f"\n  ⚠️  batch at offset {i} failed ({str(e)[:120]}) — skipping")
+        print(f"  Inserted {inserted}/{total}" + (f" ({failed} failed)" if failed else ""), end="\r")
 
-    print(f"  Inserted {inserted}/{len(rows)} chunks          ")
+    client.flush(cfg.milvus_collection)
+    print(f"  Inserted {inserted}/{total} chunks" + (f" — {failed} failed" if failed else "") + "          ")
 
     # Final stats
     stats = client.get_collection_stats(cfg.milvus_collection)

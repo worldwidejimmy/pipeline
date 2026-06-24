@@ -12,28 +12,28 @@ Endpoints:
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import time
 from typing import AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from src.graph.pipeline import build_pipeline, CineState, _get_memory
 from src.tools import tmdb_client
+from src import usage
+from src.compare import compare_stream
 
 app = FastAPI(title="SmartMovieSearch", version="2.0.0")
 
-# ── Preview access gate ──────────────────────────────────────────────────────
-# Password is validated server-side; never exposed in the JS bundle.
-# The derived token is sent as X-Access-Token header (or ?_t= for EventSource).
-# Set PREVIEW_PASSWORD in backend/.env — do NOT hardcode here (public repo).
-import os as _os
-_PREVIEW_PASSWORD = _os.environ.get("PREVIEW_PASSWORD", "")
-_ACCESS_TOKEN     = hashlib.sha256(f"sms-gate:{_PREVIEW_PASSWORD}".encode()).hexdigest()
+# ── Open access ──────────────────────────────────────────────────────────────
+# The site is public. Anonymous visitors get a small per-IP free quota; signing
+# in with the preview password lifts the limit (see src/usage.py). The password
+# is validated server-side and never exposed in the JS bundle.
+_PREVIEW_PASSWORD = usage.PREVIEW_PASSWORD
+_ACCESS_TOKEN     = usage.ACCESS_TOKEN
 
 _CORS_ORIGINS = [
     "http://localhost:5174",
@@ -54,29 +54,19 @@ app.add_middleware(
 )
 
 
-@app.middleware("http")
-async def access_gate(request: Request, call_next):
-    """Block unauthenticated requests to all /api/ routes except /api/auth and /api/health.
-    Allows CORS OPTIONS preflight through unconditionally."""
-    path   = request.url.path
-    method = request.method
+_SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
-    # Always let CORS preflight and public endpoints through
-    if method == "OPTIONS" or path in ("/api/auth", "/api/health"):
-        return await call_next(request)
 
-    if path.startswith("/api/"):
-        token = (
-            request.headers.get("X-Access-Token")
-            or request.query_params.get("_t")
-        )
-        if token != _ACCESS_TOKEN:
-            # Include CORS header so the browser sees 401, not a CORS error
-            origin = request.headers.get("origin", "")
-            headers = {"Access-Control-Allow-Origin": origin} if origin in _CORS_ORIGINS else {}
-            return JSONResponse({"detail": "Unauthorized"}, status_code=401, headers=headers)
-
-    return await call_next(request)
+async def _ip_limit_stream(gate: dict) -> AsyncIterator[str]:
+    """One-shot SSE stream emitted when an anonymous IP is out of free credits."""
+    mins = max(1, round(gate.get("reset_in", 0) / 60))
+    yield _sse("pipeline_error", {
+        "code":    "ip_limit",
+        "message": (f"You've used your {gate['limit']} free searches for the hour. "
+                    f"Sign in with the access password for unlimited searches, "
+                    f"or try again in ~{mins} min."),
+        "reset_in": gate.get("reset_in", 0),
+    })
 
 
 _AGENT_NODES = {
@@ -199,9 +189,16 @@ async def _stream_pipeline(question: str, thread_id: str) -> AsyncIterator[str]:
 
             elif etype == "on_chat_model_end":
                 output = data.get("output")
-                um = getattr(output, "usage_metadata", None)
-                prompt_t = getattr(um, "input_tokens", 0) or 0
-                compl_t  = getattr(um, "output_tokens", 0) or 0
+                # usage_metadata is a TypedDict (dict at runtime) on modern
+                # langchain-core — use dict access, not getattr (which silently
+                # returns 0). Some response_metadata fallbacks differ per provider.
+                um = getattr(output, "usage_metadata", None) or {}
+                if isinstance(um, dict):
+                    prompt_t = um.get("input_tokens", 0) or 0
+                    compl_t  = um.get("output_tokens", 0) or 0
+                else:
+                    prompt_t = getattr(um, "input_tokens", 0) or 0
+                    compl_t  = getattr(um, "output_tokens", 0) or 0
                 total_prompt_tokens     += prompt_t
                 total_completion_tokens += compl_t
                 yield _sse("llm_end", {
@@ -212,6 +209,7 @@ async def _stream_pipeline(question: str, thread_id: str) -> AsyncIterator[str]:
 
     except Exception as exc:
         import re as _re
+        usage.add_tokens(total_prompt_tokens, total_completion_tokens)
         raw = str(exc)
 
         def _sanitize(text: str) -> str:
@@ -260,6 +258,7 @@ async def _stream_pipeline(question: str, thread_id: str) -> AsyncIterator[str]:
             })
         return
 
+    usage.add_tokens(total_prompt_tokens, total_completion_tokens)
     total_ms = int(time.time() * 1000) - start_ms
     yield _sse("done", {
         "total_latency_ms":        total_ms,
@@ -273,18 +272,39 @@ async def _stream_pipeline(question: str, thread_id: str) -> AsyncIterator[str]:
 
 @app.get("/api/query")
 async def query_stream(
+    request:   Request,
     q:         str = Query(..., min_length=1),
     thread_id: str = Query(default="default"),
 ):
-    """SSE stream: run pipeline for a question within a conversation thread."""
-    return StreamingResponse(
-        _stream_pipeline(q, thread_id),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control":    "no-cache",
-            "X-Accel-Buffering": "no",
-        },
-    )
+    """SSE stream: run pipeline for a question within a conversation thread.
+    Anonymous callers spend one per-IP free credit; signed-in callers are unlimited."""
+    gate = usage.consume(request)
+    if not gate["allowed"]:
+        return StreamingResponse(_ip_limit_stream(gate),
+                                 media_type="text/event-stream", headers=_SSE_HEADERS)
+    return StreamingResponse(_stream_pipeline(q, thread_id),
+                             media_type="text/event-stream", headers=_SSE_HEADERS)
+
+
+@app.get("/api/compare")
+async def compare_query(
+    request: Request,
+    q:       str = Query(..., min_length=1),
+):
+    """SSE stream: answer the same question with and without RAG, side by side.
+    Costs one free credit (same as a normal search) even though it makes two LLM calls."""
+    gate = usage.consume(request)
+    if not gate["allowed"]:
+        return StreamingResponse(_ip_limit_stream(gate),
+                                 media_type="text/event-stream", headers=_SSE_HEADERS)
+    return StreamingResponse(compare_stream(q),
+                             media_type="text/event-stream", headers=_SSE_HEADERS)
+
+
+@app.get("/api/usage")
+async def get_usage(request: Request):
+    """Current per-IP free quota + daily token usage for the caller."""
+    return usage.snapshot(request)
 
 
 @app.get("/api/history")
@@ -405,28 +425,68 @@ async def service_status():
 
 @app.get("/api/knowledge")
 async def knowledge_base():
-    """Return a summary of what's in the Milvus RAG knowledge base."""
+    """Summarise the Milvus RAG knowledge base.
+
+    The corpus has two very differently-shaped parts: a few dozen curated markdown
+    docs (listed individually) and tens of thousands of Roger Ebert reviews
+    (collapsed into one summary bucket — listing them all would be useless). Counts
+    use Milvus count(*) so they stay accurate at any scale."""
     try:
         from pymilvus import MilvusClient
         from src.config import get_config
+        from collections import Counter
         cfg = get_config()
         client = MilvusClient(uri=cfg.milvus_uri)
-        rows = client.query(
+
+        def count(flt: str) -> int:
+            return client.query(cfg.milvus_collection, filter=flt,
+                                output_fields=["count(*)"])[0]["count(*)"]
+
+        total_chunks  = count("")
+        ebert_chunks  = count('source like "ebert/%"')
+
+        # Markdown docs are few (~hundreds of rows) — safe to list individually.
+        doc_rows = client.query(
             cfg.milvus_collection,
-            filter="",
+            filter='source like "docs/%"',
             output_fields=["source"],
-            limit=5000,
+            limit=16384,
         )
-        from collections import Counter
-        counts = Counter(r["source"] for r in rows)
+        counts = Counter(r["source"] for r in doc_rows)
         docs = [{"source": src, "chunks": n} for src, n in sorted(counts.items())]
+
+        # Distinct review count (slug-level), de-duping amp/ mirror variants.
+        review_slugs: set[str] = set()
+        if ebert_chunks:
+            it = client.query_iterator(
+                cfg.milvus_collection,
+                filter='source like "ebert/%"',
+                output_fields=["source"],
+                batch_size=16_000,
+            )
+            while True:
+                batch = it.next()
+                if not batch:
+                    it.close()
+                    break
+                for r in batch:
+                    slug = r["source"].removeprefix("ebert/").removeprefix("amp/")
+                    review_slugs.add(slug)
+
+        reviews = {
+            "label":   "Roger Ebert Reviews",
+            "reviews": len(review_slugs),
+            "chunks":  ebert_chunks,
+        } if ebert_chunks else None
+
         return {
-            "total_chunks": sum(counts.values()),
-            "total_docs": len(docs),
-            "docs": docs,
+            "total_chunks": total_chunks,
+            "total_docs":   len(docs) + (1 if reviews else 0),
+            "docs":         docs,
+            "reviews":      reviews,
         }
     except Exception as exc:
-        return {"total_chunks": 0, "total_docs": 0, "docs": [], "error": str(exc)}
+        return {"total_chunks": 0, "total_docs": 0, "docs": [], "reviews": None, "error": str(exc)}
 
 
 @app.get("/api/rules")
