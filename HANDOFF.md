@@ -84,7 +84,8 @@ Install the cron (3:30 ET nightly) — **not auto-installed**:
 
 The site is **public** — no password wall. `src/usage.py` enforces:
 
-- **Anonymous:** `FREE_REQUESTS_PER_WINDOW` (default **3**) searches per **`FREE_WINDOW_SECONDS`** (default **3600s / 1h**) per IP. Over limit → `/api/query` and `/api/compare` emit a `pipeline_error` SSE with `code: "ip_limit"` (frontend opens the sign-in modal).
+- **Anonymous:** `FREE_REQUESTS_PER_WINDOW` (default **10**) searches per **`FREE_WINDOW_SECONDS`** (default **3600s / 1h**) per IP. Over limit → `/api/query` and `/api/compare` emit a `pipeline_error` SSE with `code: "ip_limit"` (frontend opens the sign-in modal).
+- **Site-wide daily cap:** `GLOBAL_DAILY_CALL_CAP` (default **100**) — total anonymous searches/day across everyone (research/showcase). Over it → `code: "daily_cap"`. Signed-in/admin bypasses. Also `DAILY_TOKEN_HARD_CAP` (default 0/off) pauses anonymous calls once the day's token spend is hit. Both reset at UTC midnight; counters are in-memory.
 - **Signed in:** the old `PREVIEW_PASSWORD` now grants **unlimited** access (token via `POST /api/auth`, sent as `X-Access-Token` / `?_t=`). Leaving `PREVIEW_PASSWORD` blank means *no one* can unlock unlimited.
 - **Token meter:** cumulative Claude tokens used **today by everyone** (your paid spend), accumulated server-side and exposed at **`GET /api/usage`** alongside the caller's remaining free credits. `DAILY_TOKEN_BUDGET` (default 0 = no cap) optionally sets a meter denominator.
 - **Real client IP:** read from `CF-Connecting-IP` (Cloudflare), then `X-Forwarded-For[0]`. **Do not** trust `X-Real-IP` — the frontend-container nginx overwrites it with the docker gateway.
