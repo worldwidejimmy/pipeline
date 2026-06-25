@@ -34,6 +34,10 @@ DAILY_TOKEN_BUDGET = int(os.environ.get("DAILY_TOKEN_BUDGET", "0"))
 # Hard kill-switch: when today's total reaches this, anonymous LLM calls are paused
 # (signed-in/admin still works). 0 = disabled. Protects against runaway paid spend.
 DAILY_TOKEN_HARD_CAP = int(os.environ.get("DAILY_TOKEN_HARD_CAP", "0"))
+# Global ceiling on anonymous searches per day across the whole site (research/demo
+# project). Each /api/query or /api/compare counts as 1; signed-in/admin bypasses.
+# 0 = disabled.
+GLOBAL_DAILY_CALL_CAP = int(os.environ.get("GLOBAL_DAILY_CALL_CAP", "100"))
 
 AUTH_MAX_FAILS = int(os.environ.get("AUTH_MAX_FAILS", "5"))
 AUTH_LOCKOUT_SECONDS = int(os.environ.get("AUTH_LOCKOUT_SECONDS", "900"))  # 15 min
@@ -50,6 +54,9 @@ _tokens_used: int = 0
 # per-IP daily stats for the admin screen: ip → {requests, tokens, first_seen, last_seen}
 _ip_stats: dict[str, dict] = {}
 _stats_day: str = ""
+# global anonymous-search counter for the daily site-wide cap (reset on UTC rollover)
+_global_calls_day: str = ""
+_global_calls: int = 0
 # blacklisted IPs (file-backed so it survives restarts)
 _blacklist: set[str] = set()
 # ip → recent failed /api/auth attempt timestamps (lockout)
@@ -150,6 +157,21 @@ def over_hard_cap() -> bool:
     return DAILY_TOKEN_HARD_CAP > 0 and tokens_used_today() >= DAILY_TOKEN_HARD_CAP
 
 
+def _roll_global_day_locked() -> None:
+    global _global_calls_day, _global_calls
+    today = _today()
+    if today != _global_calls_day:
+        _global_calls_day = today
+        _global_calls = 0
+
+
+def global_calls_today() -> int:
+    with _lock:
+        if _today() != _global_calls_day:
+            return 0
+        return _global_calls
+
+
 # ── Per-IP rate limiting (rolling window) ─────────────────────────────────────
 def _prune(ip: str, now: float) -> list[float]:
     hits = [t for t in _ip_hits.get(ip, []) if now - t < WINDOW_SECONDS]
@@ -191,6 +213,7 @@ def consume(request: Request) -> dict:
             s["last_seen"] = time.time()
         return {"allowed": True, "unlimited": True, "limit": FREE_LIMIT,
                 "remaining": FREE_LIMIT, "reset_in": 0}
+    global _global_calls
     now = time.time()
     with _lock:
         hits = _prune(ip, now)
@@ -198,6 +221,12 @@ def consume(request: Request) -> dict:
             reset_in = int(WINDOW_SECONDS - (now - min(hits)))
             return {"allowed": False, "unlimited": False, "limit": FREE_LIMIT,
                     "remaining": 0, "reset_in": max(0, reset_in)}
+        # Site-wide daily ceiling (checked before spending the per-IP credit)
+        _roll_global_day_locked()
+        if GLOBAL_DAILY_CALL_CAP > 0 and _global_calls >= GLOBAL_DAILY_CALL_CAP:
+            return {"allowed": False, "global_cap": True, "unlimited": False,
+                    "limit": FREE_LIMIT, "remaining": 0, "reset_in": 0}
+        _global_calls += 1
         hits.append(now)
         _ip_hits[ip] = hits
         reset_in = int(WINDOW_SECONDS - (now - min(hits)))
@@ -259,6 +288,8 @@ def admin_snapshot() -> dict:
     return {
         "day":          _stats_day or _today(),
         "total_tokens": tokens_used_today(),
+        "calls_today":  global_calls_today(),
+        "call_cap":     GLOBAL_DAILY_CALL_CAP,
         "free_limit":   FREE_LIMIT,
         "window_seconds": WINDOW_SECONDS,
         "ips":          rows,
@@ -278,4 +309,6 @@ def snapshot(request: Request) -> dict:
         "reset_in":           q["reset_in"],
         "tokens_used_today":  tokens_used_today(),
         "token_budget":       DAILY_TOKEN_BUDGET,
+        "calls_today":        global_calls_today(),
+        "call_cap":           GLOBAL_DAILY_CALL_CAP,
     }
