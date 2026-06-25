@@ -307,6 +307,10 @@ async def query_stream(
         return StreamingResponse(_oneshot_error("bot_blocked",
             "Automated access is not allowed. Use the website in a browser."),
             media_type="text/event-stream", headers=_SSE_HEADERS)
+    if usage.over_hard_cap() and not usage.is_unlimited(request):
+        return StreamingResponse(_oneshot_error("daily_cap",
+            "The daily usage limit for this demo has been reached — please try again tomorrow."),
+            media_type="text/event-stream", headers=_SSE_HEADERS)
     gate = usage.consume(request)
     if not gate["allowed"]:
         if gate.get("blocked"):
@@ -330,6 +334,10 @@ async def compare_query(
         return StreamingResponse(_oneshot_error("bot_blocked",
             "Automated access is not allowed. Use the website in a browser."),
             media_type="text/event-stream", headers=_SSE_HEADERS)
+    if usage.over_hard_cap() and not usage.is_unlimited(request):
+        return StreamingResponse(_oneshot_error("daily_cap",
+            "The daily usage limit for this demo has been reached — please try again tomorrow."),
+            media_type="text/event-stream", headers=_SSE_HEADERS)
     gate = usage.consume(request)
     if not gate["allowed"]:
         if gate.get("blocked"):
@@ -349,8 +357,9 @@ async def get_usage(request: Request):
 
 
 @app.get("/api/history")
-async def get_history(thread_id: str = Query(default="default")):
-    """Return conversation history for a thread."""
+async def get_history(request: Request, thread_id: str = Query(default="default")):
+    """Return conversation history for a thread. Admin-only (not used by the public UI)."""
+    _require_admin(request)
     pipeline = build_pipeline()
     config   = {"configurable": {"thread_id": thread_id}}
     state    = pipeline.get_state(config)
@@ -359,8 +368,9 @@ async def get_history(thread_id: str = Query(default="default")):
 
 
 @app.delete("/api/history")
-async def clear_history(thread_id: str = Query(default="default")):
-    """Clear conversation history for a thread (start fresh)."""
+async def clear_history(request: Request, thread_id: str = Query(default="default")):
+    """Clear conversation history for a thread (start fresh). Admin-only."""
+    _require_admin(request)
     # MemorySaver doesn't expose a delete — we write empty history
     pipeline = build_pipeline()
     config   = {"configurable": {"thread_id": thread_id}}

@@ -31,6 +31,9 @@ FREE_LIMIT = int(os.environ.get("FREE_REQUESTS_PER_WINDOW", "10"))
 WINDOW_SECONDS = int(os.environ.get("FREE_WINDOW_SECONDS", "3600"))   # rolling 1h
 # 0 = no cap; the meter just shows cumulative tokens used today by everyone.
 DAILY_TOKEN_BUDGET = int(os.environ.get("DAILY_TOKEN_BUDGET", "0"))
+# Hard kill-switch: when today's total reaches this, anonymous LLM calls are paused
+# (signed-in/admin still works). 0 = disabled. Protects against runaway paid spend.
+DAILY_TOKEN_HARD_CAP = int(os.environ.get("DAILY_TOKEN_HARD_CAP", "0"))
 
 AUTH_MAX_FAILS = int(os.environ.get("AUTH_MAX_FAILS", "5"))
 AUTH_LOCKOUT_SECONDS = int(os.environ.get("AUTH_LOCKOUT_SECONDS", "900"))  # 15 min
@@ -140,6 +143,11 @@ def tokens_used_today() -> int:
         if _today() != _token_day:
             return 0
         return _tokens_used
+
+
+def over_hard_cap() -> bool:
+    """True when today's total token spend has hit the kill-switch ceiling."""
+    return DAILY_TOKEN_HARD_CAP > 0 and tokens_used_today() >= DAILY_TOKEN_HARD_CAP
 
 
 # ── Per-IP rate limiting (rolling window) ─────────────────────────────────────
