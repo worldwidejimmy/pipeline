@@ -58,7 +58,7 @@ export function AdminModal({ onClose }: Props) {
               <div className="modal-title-text">Admin — Usage &amp; Abuse</div>
               <div className="modal-title-sub">
                 {data
-                  ? `${data.ips.length} active IPs today · ${fmt(data.total_tokens)} tokens · limit ${data.free_limit}/hr`
+                  ? `${data.calls_today}${data.call_cap ? `/${data.call_cap}` : ''} searches today · ${data.ips.length} IPs · ${fmt(data.total_tokens)} tokens · ${data.free_limit}/IP/hr`
                   : error || 'Loading…'}
               </div>
             </div>

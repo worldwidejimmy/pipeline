@@ -317,6 +317,10 @@ async def query_stream(
             return StreamingResponse(_oneshot_error("blocked",
                 "Access from your network has been blocked."),
                 media_type="text/event-stream", headers=_SSE_HEADERS)
+        if gate.get("global_cap"):
+            return StreamingResponse(_oneshot_error("daily_cap",
+                "This demo has reached its daily limit — please check back tomorrow."),
+                media_type="text/event-stream", headers=_SSE_HEADERS)
         return StreamingResponse(_ip_limit_stream(gate),
                                  media_type="text/event-stream", headers=_SSE_HEADERS)
     return StreamingResponse(_stream_pipeline(q, thread_id, usage.client_ip(request)),
@@ -343,6 +347,10 @@ async def compare_query(
         if gate.get("blocked"):
             return StreamingResponse(_oneshot_error("blocked",
                 "Access from your network has been blocked."),
+                media_type="text/event-stream", headers=_SSE_HEADERS)
+        if gate.get("global_cap"):
+            return StreamingResponse(_oneshot_error("daily_cap",
+                "This demo has reached its daily limit — please check back tomorrow."),
                 media_type="text/event-stream", headers=_SSE_HEADERS)
         return StreamingResponse(_ip_limit_stream(gate),
                                  media_type="text/event-stream", headers=_SSE_HEADERS)

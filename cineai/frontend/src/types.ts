@@ -136,6 +136,8 @@ export interface AdminIpRow {
 export interface AdminUsage {
   day: string;
   total_tokens: number;
+  calls_today: number;
+  call_cap: number;
   free_limit: number;
   window_seconds: number;
   ips: AdminIpRow[];
