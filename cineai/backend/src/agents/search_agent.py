@@ -5,7 +5,7 @@ from current entertainment news and reviews.
 from __future__ import annotations
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_groq import ChatGroq
+from src.llm import get_chat
 
 from src.config import get_config
 from src.tools.web_search import web_search
@@ -21,15 +21,8 @@ Search Results:
 """
 
 
-def _get_llm() -> ChatGroq:
-    cfg = get_config()
-    return ChatGroq(
-        model=cfg.groq_model,
-        temperature=0.1,
-        api_key=cfg.groq_api_key,
-        max_tokens=800,
-        streaming=True,
-    )
+def _get_llm():
+    return get_chat(temperature=0.1, max_tokens=800, streaming=True)
 
 
 async def search_agent_node(state: dict) -> dict:

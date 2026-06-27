@@ -110,6 +110,49 @@ export type PipelineEvent =
   | DoneEvent
   | ErrorEvent;
 
+// ── Usage / quota ─────────────────────────────────────────────────────────────
+
+export interface Usage {
+  unlimited: boolean;
+  free_limit: number;
+  free_remaining: number;
+  free_used: number;
+  window_seconds: number;
+  reset_in: number;
+  tokens_used_today: number;
+  token_budget: number;
+}
+
+// ── Admin ─────────────────────────────────────────────────────────────────────
+
+export interface AdminIpRow {
+  ip: string;
+  requests: number;
+  tokens: number;
+  last_seen: number;
+  blacklisted: boolean;
+}
+
+export interface AdminUsage {
+  day: string;
+  total_tokens: number;
+  calls_today: number;
+  call_cap: number;
+  free_limit: number;
+  window_seconds: number;
+  ips: AdminIpRow[];
+  blacklist: string[];
+}
+
+// ── RAG-vs-no-RAG compare ─────────────────────────────────────────────────────
+
+export type CompareSide = 'rag' | 'base';
+
+export interface CompareTokens {
+  prompt_tokens: number;
+  completion_tokens: number;
+}
+
 // ── TMDB types ────────────────────────────────────────────────────────────────
 
 export interface TmdbMovie {

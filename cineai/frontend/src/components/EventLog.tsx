@@ -53,7 +53,7 @@ function toDisplay(e: PipelineEvent, baseTs: number): DisplayEvent | null {
         icon: '🤖',
         typeLabel: 'LLM CALL',
         detail: `${m.label}`,
-        subDetail: e.model || 'groq',
+        subDetail: e.model || 'claude',
         ts,
       }
     }

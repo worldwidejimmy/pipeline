@@ -20,6 +20,13 @@ export function apiFetch(url: string, init?: RequestInit): Promise<Response> {
   return fetch(url, { ...init, headers })
 }
 
+/** Fetch the caller's current free-quota + token usage. */
+export async function fetchUsage() {
+  const res = await apiFetch('/api/usage')
+  if (!res.ok) throw new Error('usage fetch failed')
+  return res.json()
+}
+
 /** Build an EventSource URL with the access token as a query param.
  *  EventSource does not support custom headers, so we pass the token
  *  in the URL instead (accepted by the backend middleware). */

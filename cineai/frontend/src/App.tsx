@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { PipelineEvent, TmdbMovie } from './types'
+import { PipelineEvent, TmdbMovie, Usage, RagChunk, CompareTokens } from './types'
 import { PipelineGraph } from './components/PipelineGraph'
 import { AgentTimeline } from './components/AgentTimeline'
 import { EventLog } from './components/EventLog'
@@ -10,7 +10,10 @@ import { KnowledgeModal } from './components/KnowledgeModal'
 import { StatusModal } from './components/StatusModal'
 import { RoutingRulesModal } from './components/RoutingRulesModal'
 import { PasswordGate } from './components/PasswordGate'
-import { getAccessToken, apiFetch, makeSSEUrl } from './api'
+import { UsageBadge } from './components/UsageBadge'
+import { AdminModal } from './components/AdminModal'
+import { CompareView } from './components/CompareView'
+import { getAccessToken, clearAccessToken, apiFetch, makeSSEUrl, fetchUsage } from './api'
 
 const EXAMPLE_QUERIES = [
   { icon: '🕵️', text: 'Show me good bank heist movies' },
@@ -51,6 +54,25 @@ export default function App() {
   const [showStatus,    setShowStatus]    = useState(false)
   const [showRules,     setShowRules]     = useState(false)
 
+  // Open-access usage / sign-in
+  const [usage,      setUsage]      = useState<Usage | null>(null)
+  const [showSignIn, setShowSignIn] = useState(false)
+  const [signInReason, setSignInReason] = useState<string | undefined>(undefined)
+  const [showAdmin,  setShowAdmin]  = useState(false)
+
+  // RAG-vs-no-RAG compare mode
+  const [compareMode,  setCompareMode]  = useState(false)
+  const [compareActive, setCompareActive] = useState(false)
+  const [cmpRag,    setCmpRag]    = useState('')
+  const [cmpBase,   setCmpBase]   = useState('')
+  const [cmpChunks, setCmpChunks] = useState<RagChunk[]>([])
+  const [cmpRagTokens,  setCmpRagTokens]  = useState<CompareTokens | null>(null)
+  const [cmpBaseTokens, setCmpBaseTokens] = useState<CompareTokens | null>(null)
+
+  const refreshUsage = useCallback(() => {
+    fetchUsage().then(setUsage).catch(() => {})
+  }, [])
+
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
     localStorage.setItem('sms-theme', theme)
@@ -58,7 +80,7 @@ export default function App() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { setShowKnowledge(false); setShowStatus(false); setShowRules(false) }
+      if (e.key === 'Escape') { setShowKnowledge(false); setShowStatus(false); setShowRules(false); setShowAdmin(false) }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
@@ -78,13 +100,20 @@ export default function App() {
     }
   }, [history])
 
+  // Public now — load trending and usage on mount (and whenever auth changes)
   useEffect(() => {
-    if (!token) return
     apiFetch('/api/trending')
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(d => setTrending(d.results?.slice(0, 6) ?? []))
       .catch(() => {})
-  }, [token])
+    refreshUsage()
+  }, [token, refreshUsage])
+
+  const resetCompare = useCallback(() => {
+    setCompareActive(false)
+    setCmpRag(''); setCmpBase('')
+    setCmpChunks([]); setCmpRagTokens(null); setCmpBaseTokens(null)
+  }, [])
 
   const startNewConversation = useCallback(() => {
     esRef.current?.close()
@@ -95,12 +124,32 @@ export default function App() {
     setQuery('')
     setStream(false)
     setTurnNum(0)
+    resetCompare()
+  }, [resetCompare])
+
+  const openSignIn = useCallback((reason?: string) => {
+    setSignInReason(reason)
+    setShowSignIn(true)
   }, [])
+
+  const handleAuth = useCallback((t: string) => {
+    setToken(t)
+    setShowSignIn(false)
+    setSignInReason(undefined)
+    refreshUsage()
+  }, [refreshUsage])
+
+  const handleSignOut = useCallback(() => {
+    clearAccessToken()
+    setToken(null)
+    refreshUsage()
+  }, [refreshUsage])
 
   const runQuery = useCallback((q: string) => {
     if (!q.trim() || isStreaming) return
     esRef.current?.close()
 
+    resetCompare()
     setEvents([])
     setAnswer('')
     setStream(true)
@@ -131,12 +180,17 @@ export default function App() {
       addEvent('error', e)
       try {
         const p = JSON.parse(e.data)
-        setErrorBanner({ code: p.code ?? 'pipeline_error', message: p.message ?? 'Unknown error', detail: p.detail })
+        if (p.code === 'ip_limit') {
+          openSignIn(p.message)
+        } else {
+          setErrorBanner({ code: p.code ?? 'pipeline_error', message: p.message ?? 'Unknown error', detail: p.detail })
+        }
       } catch {
         setErrorBanner({ code: 'pipeline_error', message: 'An unexpected error occurred.' })
       }
       setStream(false)
       es.close()
+      refreshUsage()
     })
 
     es.addEventListener('token', (e: MessageEvent) => {
@@ -155,19 +209,76 @@ export default function App() {
       if (currentAnswer) {
         setHistory(prev => [...prev, { q: q.trim(), a: currentAnswer }])
       }
+      refreshUsage()
     })
 
     es.onerror = () => {
       setStream(prev => { if (prev) es.close(); return false })
     }
-  }, [isStreaming, threadId])
+  }, [isStreaming, threadId, resetCompare, openSignIn, refreshUsage])
+
+  const runCompare = useCallback((q: string) => {
+    if (!q.trim() || isStreaming) return
+    esRef.current?.close()
+
+    setEvents([])
+    setAnswer('')
+    setStream(true)
+    setCompareActive(true)
+    setCmpRag(''); setCmpBase('')
+    setCmpChunks([]); setCmpRagTokens(null); setCmpBaseTokens(null)
+    setTurnNum(p => p + 1)
+
+    let rag = '', base = ''
+    const url = makeSSEUrl(`/api/compare?q=${encodeURIComponent(q.trim())}`)
+    const es = new EventSource(url)
+    esRef.current = es
+
+    es.addEventListener('chunks_retrieved', (e: MessageEvent) => {
+      try { setCmpChunks(JSON.parse(e.data).chunks ?? []) } catch { /* ignore */ }
+    })
+    es.addEventListener('compare_token', (e: MessageEvent) => {
+      const p = JSON.parse(e.data)
+      if (p.side === 'rag')  { rag  += p.content; setCmpRag(rag) }
+      else                   { base += p.content; setCmpBase(base) }
+    })
+    es.addEventListener('compare_side_end', (e: MessageEvent) => {
+      const p = JSON.parse(e.data)
+      const t = { prompt_tokens: p.prompt_tokens, completion_tokens: p.completion_tokens }
+      if (p.side === 'rag') setCmpRagTokens(t); else setCmpBaseTokens(t)
+    })
+    es.addEventListener('compare_done', () => {
+      setStream(false); es.close(); refreshUsage()
+    })
+    es.addEventListener('pipeline_error', e => {
+      try {
+        const p = JSON.parse(e.data)
+        if (p.code === 'ip_limit') openSignIn(p.message)
+        else setErrorBanner({ code: p.code ?? 'pipeline_error', message: p.message ?? 'Unknown error' })
+      } catch { setErrorBanner({ code: 'pipeline_error', message: 'An unexpected error occurred.' }) }
+      setStream(false); es.close(); setCompareActive(false); refreshUsage()
+    })
+    es.addEventListener('compare_error', (e: MessageEvent) => {
+      try {
+        const p = JSON.parse(e.data)
+        if (p.side === 'rag') setCmpRag(prev => prev || `⚠️ ${p.message}`)
+        else setCmpBase(prev => prev || `⚠️ ${p.message}`)
+      } catch { /* ignore */ }
+    })
+    es.onerror = () => { setStream(prev => { if (prev) es.close(); return false }) }
+  }, [isStreaming, openSignIn, refreshUsage])
+
+  const run = useCallback((q: string) => {
+    if (compareMode) runCompare(q)
+    else runQuery(q)
+  }, [compareMode, runCompare, runQuery])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    runQuery(query)
+    run(query)
   }
 
-  const showTrending = !answer && !isStreaming && history.length === 0
+  const showTrending = !answer && !isStreaming && history.length === 0 && !compareActive
 
   const ERROR_ICONS: Record<string, string> = {
     rate_limit:       '⏳',
@@ -185,8 +296,17 @@ export default function App() {
   return (
     <div className="app">
 
-      {/* ── Password gate overlay ───────────────────────────────────────── */}
-      {!token && <PasswordGate onAuth={t => setToken(t)} />}
+      {/* ── Optional sign-in modal (unlock unlimited) ───────────────────── */}
+      {showSignIn && (
+        <PasswordGate
+          onAuth={handleAuth}
+          onClose={() => { setShowSignIn(false); setSignInReason(undefined) }}
+          reason={signInReason}
+        />
+      )}
+
+      {/* ── Admin modal ─────────────────────────────────────────────────── */}
+      {showAdmin && <AdminModal onClose={() => setShowAdmin(false)} />}
 
       {/* ── Status modal ────────────────────────────────────────────────── */}
       {showStatus && <StatusModal onClose={() => setShowStatus(false)} />}
@@ -198,7 +318,7 @@ export default function App() {
       {showKnowledge && (
         <KnowledgeModal
           onClose={() => setShowKnowledge(false)}
-          onSearch={q => { setQuery(q); runQuery(q) }}
+          onSearch={q => { setQuery(q); run(q) }}
         />
       )}
 
@@ -241,6 +361,17 @@ export default function App() {
             </div>
           </div>
           <div className="header-right">
+            <UsageBadge usage={usage} onSignIn={() => openSignIn()} onSignOut={handleSignOut} />
+            {usage?.unlimited && (
+              <button
+                className="header-icon-btn"
+                onClick={() => setShowAdmin(true)}
+                title="Admin — usage & abuse"
+                aria-label="Admin"
+              >
+                🛡️
+              </button>
+            )}
             {history.length > 0 && (
               <span className="header-turns">
                 {history.length} turn{history.length !== 1 ? 's' : ''}
@@ -320,9 +451,20 @@ export default function App() {
               />
             </div>
             <button className="query-btn" type="submit" disabled={isStreaming || !query.trim()}>
-              {isStreaming ? '…' : 'Search'}
+              {isStreaming ? '…' : compareMode ? 'Compare' : 'Search'}
             </button>
           </form>
+
+          <label className="compare-toggle" title="Answer the same question with and without retrieval, side by side. Costs one search.">
+            <input
+              type="checkbox"
+              checked={compareMode}
+              onChange={e => setCompareMode(e.target.checked)}
+              disabled={isStreaming}
+            />
+            <span className="compare-toggle-track"><span className="compare-toggle-thumb" /></span>
+            <span className="compare-toggle-label">🆚 Compare RAG vs. no-RAG</span>
+          </label>
 
           {history.length === 0 && (
             <div className="example-queries">
@@ -330,7 +472,7 @@ export default function App() {
                 <button
                   key={text}
                   className="example-chip"
-                  onClick={() => { setQuery(text); runQuery(text) }}
+                  onClick={() => { setQuery(text); run(text) }}
                   disabled={isStreaming}
                 >
                   <span>{icon}</span>
@@ -355,7 +497,7 @@ export default function App() {
                     className="movie-card"
                     onClick={() => {
                       const q = `Tell me about the movie ${m.title}${m.year ? ` (${m.year})` : ''}`
-                      setQuery(q); runQuery(q)
+                      setQuery(q); run(q)
                     }}
                   >
                     <div className="movie-card-poster-wrap">
@@ -413,8 +555,27 @@ export default function App() {
             </div>
           ))}
 
+          {/* RAG vs no-RAG comparison */}
+          {compareActive && (
+            <div className="current-turn">
+              <div className="history-q">
+                <span className="history-q-icon">You</span>
+                {query || '…'}
+              </div>
+              <CompareView
+                question={query}
+                ragText={cmpRag}
+                baseText={cmpBase}
+                chunks={cmpChunks}
+                ragTokens={cmpRagTokens}
+                baseTokens={cmpBaseTokens}
+                streaming={isStreaming}
+              />
+            </div>
+          )}
+
           {/* Current streaming answer */}
-          {(answer || isStreaming) && (
+          {!compareActive && (answer || isStreaming) && (
             <div className="current-turn">
               {history.length > 0 && (
                 <div className="history-q">

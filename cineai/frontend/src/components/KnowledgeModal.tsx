@@ -6,10 +6,17 @@ interface KnowledgeDoc {
   chunks: number
 }
 
+interface ReviewsSummary {
+  label: string
+  reviews: number
+  chunks: number
+}
+
 interface KnowledgeData {
   total_chunks: number
   total_docs: number
   docs: KnowledgeDoc[]
+  reviews?: ReviewsSummary | null
   error?: string
 }
 
@@ -100,12 +107,29 @@ export function KnowledgeModal({ onClose, onSearch }: Props) {
             <div className="modal-loading">Loading knowledge base…</div>
           )}
 
-          {!loading && data && data.docs.length === 0 && (
+          {!loading && data && data.docs.length === 0 && !data.reviews && (
             <div className="modal-empty">
               <div style={{ fontSize: 32, marginBottom: 10 }}>📭</div>
               <div>No documents ingested yet.</div>
               <div style={{ fontSize: 12, marginTop: 6, opacity: 0.6 }}>
                 Run <code>make ingest</code> to populate the knowledge base.
+              </div>
+            </div>
+          )}
+
+          {!loading && data && data.reviews && data.reviews.chunks > 0 && (
+            <div className="modal-group">
+              <div className="modal-group-label">⭐ Critic Reviews</div>
+              <div className="modal-doc-grid">
+                <button
+                  className="modal-doc-card"
+                  onClick={() => { onSearch('What did Roger Ebert think of Fargo?'); onClose() }}
+                >
+                  <div className="modal-doc-title">{data.reviews.label}</div>
+                  <div className="modal-doc-chunks">
+                    {data.reviews.reviews.toLocaleString()} reviews · {data.reviews.chunks.toLocaleString()} chunks
+                  </div>
+                </button>
               </div>
             </div>
           )}

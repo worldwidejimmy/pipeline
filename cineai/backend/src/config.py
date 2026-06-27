@@ -10,8 +10,10 @@ load_dotenv()
 
 
 class Config:
-    groq_api_key: str = os.getenv("GROQ_API_KEY", "")
-    groq_model: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+    # ── LLM (Anthropic Claude) ───────────────────────────────────────────────
+    anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
+    # Server-wide model tier: haiku | sonnet | opus (see src/llm.py)
+    model_tier: str = os.getenv("DEFAULT_MODEL_TIER", "haiku")
 
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
 
