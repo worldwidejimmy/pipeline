@@ -3,9 +3,12 @@ import { setAccessToken } from '../api'
 
 interface Props {
   onAuth: (token: string) => void
+  onClose?: () => void
+  /** Optional reason shown above the form, e.g. when the free quota is exhausted. */
+  reason?: string
 }
 
-export function PasswordGate({ onAuth }: Props) {
+export function PasswordGate({ onAuth, onClose, reason }: Props) {
   const [password, setPassword] = useState('')
   const [showPass, setShowPass]   = useState(false)
   const [error, setError]         = useState('')
@@ -54,8 +57,12 @@ export function PasswordGate({ onAuth }: Props) {
   }
 
   return (
-    <div className="pg-overlay">
-      <div className={`pg-card ${shake ? 'pg-shake' : ''}`}>
+    <div className="pg-overlay" onClick={onClose}>
+      <div className={`pg-card ${shake ? 'pg-shake' : ''}`} onClick={e => e.stopPropagation()}>
+
+        {onClose && (
+          <button className="pg-close" onClick={onClose} aria-label="Close">✕</button>
+        )}
 
         <div className="pg-logo">
           <span className="pg-logo-icon">🎬</span>
@@ -64,9 +71,9 @@ export function PasswordGate({ onAuth }: Props) {
           </div>
         </div>
 
-        <h2 className="pg-title">Preview Access</h2>
+        <h2 className="pg-title">Unlimited Access</h2>
         <p className="pg-subtitle">
-          This site is in private preview. Enter the password to explore.
+          {reason ?? 'Free searches are limited per visitor. Enter the access password for unlimited searches.'}
         </p>
 
         <form className="pg-form" onSubmit={handleSubmit}>
@@ -100,7 +107,7 @@ export function PasswordGate({ onAuth }: Props) {
         </form>
 
         <p className="pg-hint">
-          AI-powered movie, TV &amp; music search — built on LangGraph + Groq
+          AI-powered movie, TV &amp; music search — built on LangGraph + Claude
         </p>
       </div>
     </div>

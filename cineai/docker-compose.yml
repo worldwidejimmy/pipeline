@@ -47,8 +47,8 @@ services:
     volumes:
       - milvus_data:/var/lib/milvus
     ports:
-      - "19530:19530"   # gRPC — SDK connects here
-      - "9091:9091"     # HTTP / health checks
+      - "127.0.0.1:19530:19530"   # gRPC — loopback only (no public Milvus access)
+      - "127.0.0.1:9091:9091"     # HTTP / health checks — loopback only
     depends_on:
       etcd:  { condition: service_healthy }
       minio: { condition: service_healthy }
@@ -64,7 +64,7 @@ services:
     environment:
       MILVUS_URL: milvus:19530
     ports:
-      - "5160:3000"     # Milvus web UI at http://localhost:5160
+      - "127.0.0.1:5160:3000"     # Milvus admin UI — loopback only (use an SSH tunnel)
     depends_on:
       - milvus
     restart: unless-stopped
@@ -76,13 +76,14 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     ports:
-      - "8001:8001"
+      - "127.0.0.1:8001:8001"   # loopback only — reached via the frontend container + nginx
     env_file:
       - ./backend/.env
     environment:
       MILVUS_URI: http://milvus:19530   # override to use internal service name
     volumes:
-      - ./backend/docs:/app/docs:ro    # mount corpus for ingest
+      - ./backend/docs:/app/docs:ro    # mount markdown corpus for ingest
+      - ./backend/data:/app/data       # scraped reviews (jsonl) for ingest_ebert
     depends_on:
       milvus: { condition: service_healthy }
     healthcheck:
@@ -97,7 +98,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - "5174:80"       # nginx serves built frontend
+      - "127.0.0.1:5174:80"       # loopback only — host nginx proxies to it
     depends_on:
       - backend
     restart: unless-stopped

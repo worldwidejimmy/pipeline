@@ -7,7 +7,7 @@ This document is for anyone taking over the **movie, TV, and music** multi-agent
 ## What this product is
 
 - **Frontend:** React (Vite), SSE client, observability panels (graph, timeline, events, RAG chunks).
-- **Backend:** FastAPI, LangGraph pipeline, Groq LLM, Milvus hybrid RAG (BM25 + dense), TMDB, optional Tavily, MusicBrainz (no key).
+- **Backend:** FastAPI, LangGraph pipeline, **Anthropic Claude** LLM (Haiku/Sonnet/Opus via `src/llm.py`), Milvus hybrid RAG (BM25 + dense), TMDB, optional Tavily, MusicBrainz (no key).
 - **Deployment:** Docker Compose in `cineai/docker-compose.yml`; production site referenced from root README.
 
 ---
@@ -16,7 +16,9 @@ This document is for anyone taking over the **movie, TV, and music** multi-agent
 
 | Path | Role |
 |------|------|
-| `cineai/backend/src/main.py` | FastAPI, SSE streaming, `/api/status`, `/api/knowledge`, **`/api/rules`**, health |
+| `cineai/backend/src/main.py` | FastAPI, SSE streaming, `/api/query`, **`/api/compare`**, **`/api/usage`**, `/api/status`, `/api/knowledge`, **`/api/rules`**, health |
+| `cineai/backend/src/usage.py` | **Open-access control**: per-IP rolling rate limit + daily token accounting + unlimited-token check |
+| `cineai/backend/src/compare.py` | **RAG-vs-no-RAG** side-by-side compare stream (two concurrent LLM calls) |
 | `cineai/backend/src/graph/pipeline.py` | LangGraph: supervisor, agents, synthesiser |
 | `cineai/backend/src/agents/supervisor.py` | Routing: **keyword overrides** + LLM; **`SUPERVISOR_LLM_RULE_BULLETS`** (single source for UI API) |
 | `cineai/backend/src/agents/tmdb_agent.py` | TMDB: titles, TV vs movie guardrails, markdown links in answers |
@@ -29,8 +31,10 @@ This document is for anyone taking over the **movie, TV, and music** multi-agent
 | `cineai/backend/scripts/scrape_ebert.py` | Roger Ebert reviews via **Wayback Machine** (live site blocks bots) |
 | `cineai/backend/scripts/ingest_ebert.py` | JSONL → chunked embeddings → Milvus **append** |
 | `cineai/backend/docs/` | Curated markdown corpus (decades, directors, TV, music, etc.) |
-| `cineai/backend/data/` | **Gitignored** generated files: `ebert_urls.json`, `ebert_reviews.jsonl`, `scrape.log` |
+| `cineai/backend/data/` | **Gitignored** generated files: `ebert_urls.json`, `ebert_reviews.jsonl`, `scrape.log`, `nightly-logs/`. **Volume-mounted** into the backend container (so ingest/cron can read it). |
+| `cineai/nightly_update.sh` | **Nightly RAG refresh** — discovers + scrapes new reviews, ingests only the new ones (idempotent). Run via cron. |
 | `cineai/frontend/src/components/RoutingRulesModal.tsx` | **Rules** UI (loads `/api/rules`) |
+| `cineai/frontend/src/components/{UsageBadge,CompareView,PasswordGate}.tsx` | Token meter + free-quota chip; RAG compare two-column view; optional sign-in modal |
 
 ---
 
@@ -56,12 +60,46 @@ This document is for anyone taking over the **movie, TV, and music** multi-agent
 2. Ingest into Milvus:
 
    ```bash
-   docker compose exec backend python scripts/ingest_ebert.py
+   docker compose exec backend python scripts/ingest_ebert.py --skip-existing
    ```
 
-   Optional: `--limit N`, `--skip-existing` (see script docstrings).
+   - **Idempotent:** `--skip-existing` dedupes on a normalized slug (`norm_slug` strips the `ebert/` and `amp/` prefixes), so the AMP mirror pages and canonical pages collapse to one review and re-runs never duplicate.
+   - **Bounded memory:** embeds + inserts in batches of `EMBED_BATCH` (256) — embedding the whole corpus at once would OOM this small shared host.
+   - Optional: `--limit N`.
+   - Current state: **~12,636 distinct reviews / ~99k chunks** ingested (37 markdown docs add ~539 more).
+
+### Nightly auto-refresh
+
+`cineai/nightly_update.sh` runs `scrape_ebert.py --refresh-recent 1` (re-queries the CDX for the current year to discover newly-archived reviews — the URL cache is otherwise never refreshed, and the old year range stopped at 2025) then `ingest_ebert.py --skip-existing`. Idempotent and flock-guarded; logs to `data/nightly-logs/`.
+
+Install the cron (3:30 ET nightly) — **not auto-installed**:
+
+```
+30 3 * * * /home/ubuntu/Code/pipeline/cineai/nightly_update.sh >> /tmp/sms-nightly-cron.log 2>&1
+```
 
 ---
+
+## Access control (open access + per-IP quota)
+
+The site is **public** — no password wall. `src/usage.py` enforces:
+
+- **Anonymous:** `FREE_REQUESTS_PER_WINDOW` (default **10**) searches per **`FREE_WINDOW_SECONDS`** (default **3600s / 1h**) per IP. Over limit → `/api/query` and `/api/compare` emit a `pipeline_error` SSE with `code: "ip_limit"` (frontend opens the sign-in modal).
+- **Site-wide daily cap:** `GLOBAL_DAILY_CALL_CAP` (default **30**) — total anonymous searches/day across everyone (research/showcase). Over it → `code: "daily_cap"`. Signed-in/admin bypasses. Also `DAILY_TOKEN_HARD_CAP` (default 0/off) pauses anonymous calls once the day's token spend is hit. Both reset at UTC midnight; counters are in-memory.
+- **Signed in:** the old `PREVIEW_PASSWORD` now grants **unlimited** access (token via `POST /api/auth`, sent as `X-Access-Token` / `?_t=`). Leaving `PREVIEW_PASSWORD` blank means *no one* can unlock unlimited.
+- **Token meter:** cumulative Claude tokens used **today by everyone** (your paid spend), accumulated server-side and exposed at **`GET /api/usage`** alongside the caller's remaining free credits. `DAILY_TOKEN_BUDGET` (default 0 = no cap) optionally sets a meter denominator.
+- **Real client IP:** read from `CF-Connecting-IP` (Cloudflare), then `X-Forwarded-For[0]`. **Do not** trust `X-Real-IP` — the frontend-container nginx overwrites it with the docker gateway.
+
+Most counters are in-memory (reset on backend redeploy); the **IP blacklist** persists to `data/ip_blacklist.json` (volume-mounted).
+
+### Abuse controls + admin
+
+- **Bot protection (lightweight):** `/api/query` and `/api/compare` reject empty / known-library User-Agents and present-but-foreign `Origin`/`Referer` (`_looks_like_bot` in `main.py`). Signed-in callers bypass it. Cloudflare **Turnstile** is the intended stronger layer — not yet wired.
+- **IP blacklist:** `usage.is_blacklisted` blocks at `consume()`; manage via the admin screen.
+- **Auth lockout:** `/api/auth` locks an IP after `AUTH_MAX_FAILS` (5) failures for `AUTH_LOCKOUT_SECONDS` (900s).
+- **Admin screen** (🛡️, header — visible only when signed in): `GET /api/admin/usage` (per-IP requests + tokens today) and `POST /api/admin/blacklist` ({ip, action}). Both gated by the access token (`usage.is_unlimited`).
+
+`GET /api/compare?q=` answers the same question twice (grounded on Milvus chunks vs. bare model) and streams both via `compare_token {side}` / `compare_side_end` / `compare_done` events. Costs **one** free credit despite two LLM calls.
 
 ## Routing and the Rules UI
 
@@ -74,7 +112,7 @@ This document is for anyone taking over the **movie, TV, and music** multi-agent
 ## Configuration and operations
 
 - **Env:** `cineai/backend/.env` (see `.env.example`). Not committed.
-- **Groq model:** Prefer a smaller/faster model on free tier (e.g. `llama-3.1-8b-instant`) to reduce rate limits; set `GROQ_MODEL` in `.env`. After `.env` changes, recreate containers: `docker compose up -d --force-recreate backend`.
+- **Model tier:** set `DEFAULT_MODEL_TIER` (`haiku` | `sonnet` | `opus`) in `.env`; one server-wide setting changes every agent (`src/llm.py`). Haiku is default (cheapest/fastest). `ANTHROPIC_API_KEY` required. After `.env` changes, recreate: `docker compose up -d --force-recreate backend`. **Opus tier:** the factory omits `temperature` (Opus 4.8 rejects sampling params with a 400).
 - **Frontend text/build:** Static assets are baked into the frontend image; after UI changes run `docker compose build frontend` (or your CI equivalent), not only `up -d`.
 - **LangSmith:** Optional tracing via `LANGCHAIN_TRACING_V2`, `LANGCHAIN_API_KEY`, `LANGCHAIN_PROJECT`.
 
@@ -89,8 +127,9 @@ This document is for anyone taking over the **movie, TV, and music** multi-agent
 
 ## Open risks / follow-ups
 
-- **Copyright / terms:** Ebert full text is ingested for RAG from archived copies; confirm your use case complies with Internet Archive and site terms.
-- **CDX completeness:** Missing years after timeouts may need manual CDX retries or quarterly splits.
+- **Copyright / terms:** Ebert full text is ingested for RAG from archived copies; confirm your use case complies with Internet Archive and site terms. When expanding to TV/music corpora, prefer CC BY-SA sources (Wikipedia, TVmaze, Last.fm) and avoid sites whose ToS ban scraping/AI use (Rotten Tomatoes, Metacritic, Letterboxd).
+- **AMP duplicates (resolved):** the scraper captured both `rogerebert.com/reviews/<slug>` and `/reviews/amp/<slug>`; ingest now normalizes the slug so they dedupe. ~6,160 pre-existing duplicate mirrors were removed.
+- **CDX completeness:** Missing years after timeouts may need manual CDX retries or quarterly splits. The Wayback CDX endpoint intermittently 503s — `--refresh-recent` handles it gracefully (skips that pass).
 - **Star ratings** in scraped JSON may be `null` if the archived HTML layout differs; parser targets `article.entry` and `.star-rating` from legacy rogerebert layouts.
 
 ---

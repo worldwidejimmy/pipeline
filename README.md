@@ -1,6 +1,6 @@
 # Multi-Agent Research Pipeline
 
-> 🚀 **Live demo:** [smartmoviesearch.com](https://smartmoviesearch.com) — running on the Groq free tier (100k tokens/day), so queries may be unavailable if the daily limit is reached. The ⚙️ status button in the app shows current availability.
+> 🚀 **Live demo:** [smartmoviesearch.com](https://smartmoviesearch.com) — open access, no login. Each visitor gets a few free searches per hour (the header shows remaining searches and the day's token usage); the access password lifts the limit and unlocks an admin view. Try the **🆚 Compare RAG vs. no-RAG** toggle to see grounded vs. ungrounded answers side by side. Powered by **Anthropic Claude** (default tier: Haiku); the ⚙️ status button shows live service health.
 
 A production agentic RAG system built with **LangGraph + Milvus**, deployed as [SmartMovieSearch](https://smartmoviesearch.com) — a natural-language movie intelligence platform.
 
@@ -59,7 +59,7 @@ deployable via Docker Compose.
 | Layer | Technology |
 |---|---|
 | Agent orchestration | [LangGraph](https://github.com/langchain-ai/langgraph) 1.2+ |
-| LLM | [Groq](https://groq.com) — model from `GROQ_MODEL` (e.g. `llama-3.1-8b-instant` on free tier) |
+| LLM | [Anthropic Claude](https://www.anthropic.com) — tier from `DEFAULT_MODEL_TIER` (haiku · sonnet · opus) |
 | Vector database | [Milvus](https://milvus.io) 2.5+ — hybrid BM25 + dense search |
 | Embeddings | OpenAI `text-embedding-3-small` |
 | Movie / TV data | [TMDB API](https://www.themoviedb.org/documentation/api) |
@@ -262,7 +262,7 @@ traced — no instrumentation code required. The LangSmith UI shows:
 | Endpoint | Description |
 |---|---|
 | `GET /api/query?q=<question>&thread_id=<id>` | SSE stream — pipeline events + streaming answer |
-| `GET /api/status` | Live health: Groq / Milvus / TMDB + API key presence |
+| `GET /api/status` | Live health: Claude / Milvus / TMDB + API key presence |
 | `GET /api/knowledge` | RAG knowledge base summary (sources + chunk counts) |
 | `GET /api/rules` | Routing decisions, keyword overrides, and LLM rule bullets (for the Rules modal) |
 | `GET /api/trending` | Trending movies from TMDB |
