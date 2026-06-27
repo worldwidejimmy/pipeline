@@ -37,7 +37,7 @@ DAILY_TOKEN_HARD_CAP = int(os.environ.get("DAILY_TOKEN_HARD_CAP", "0"))
 # Global ceiling on anonymous searches per day across the whole site (research/demo
 # project). Each /api/query or /api/compare counts as 1; signed-in/admin bypasses.
 # 0 = disabled.
-GLOBAL_DAILY_CALL_CAP = int(os.environ.get("GLOBAL_DAILY_CALL_CAP", "100"))
+GLOBAL_DAILY_CALL_CAP = int(os.environ.get("GLOBAL_DAILY_CALL_CAP", "30"))
 
 AUTH_MAX_FAILS = int(os.environ.get("AUTH_MAX_FAILS", "5"))
 AUTH_LOCKOUT_SECONDS = int(os.environ.get("AUTH_LOCKOUT_SECONDS", "900"))  # 15 min
