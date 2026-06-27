@@ -16,7 +16,7 @@ its API, the deployment on the OVH host, and the public `worldwidejimmy/pipeline
 
 | ID | Sev | Finding | Status |
 |----|-----|---------|--------|
-| SEC-1 | 🔴 High | **Origin not locked to Cloudflare.** Port 443 on the origin IP is world-open; host nginx forwards the client's `CF-Connecting-IP` unchanged. An attacker who finds the origin IP can hit it directly with `Host: smartmoviesearch.com` + a forged `CF-Connecting-IP`, bypassing Cloudflare's WAF/bot/DDoS **and** spoofing a fresh IP per request — defeating our rate limit, blacklist, auth-lockout, and bot checks. | **Partly fixed** (nginx now overwrites `CF-Connecting-IP` from validated `$remote_addr` — closes the spoof). **Cloudflare allow-list / Authenticated Origin Pulls still TODO** (owner: user, see below). |
+| SEC-1 | 🔴 High | **Origin not locked to Cloudflare.** An attacker who finds the origin IP could hit it directly (CF reaches the origin over HTTP/80, Flexible SSL) with `Host: smartmoviesearch.com`, bypassing Cloudflare's WAF/bot/DDoS and spoofing `CF-Connecting-IP`. | **FIXED 2026-06-27** — (a) nginx overwrites `CF-Connecting-IP` from validated `$remote_addr` (anti-spoof); (b) **Cloudflare-only allow-list**: `geo $realip_remote_addr $cf_ok` (v4+v6) in `conf.d/cloudflare-allowlist.conf` + `if ($cf_ok = 0) { return 403; }` in the vhost. Verified: CF path 200, direct origin 403. **Residual:** Flexible SSL (CF↔origin is HTTP) — optional upgrade to Full(Strict)+443+AOP. |
 | SEC-2 | 🟠 Med | **Docker ports on `0.0.0.0`** — `8001` (backend), `5174` (frontend), `5160` (Attu, the Milvus **admin UI, no auth**), `19530` (Milvus DB, no auth). Docker's iptables bypass ufw. External probes currently get `ECONNREFUSED` (OVH edge likely blocks), but it's undocumented/fragile; if ever reachable → full vector-DB read/wipe. | **Fixed** — all bound to `127.0.0.1` in `docker-compose.yml`. |
 | SEC-3 | 🟠 Med-High | **Financial DoS** on the paid Anthropic key. Open LLM access; per-IP cap is bypassable (SEC-1) and IP-rotatable. No global daily spend ceiling. | **Fixed (app side)** — `DAILY_TOKEN_HARD_CAP` kill-switch pauses the LLM when exceeded. **Set a billing limit + alerts in the Anthropic console** (owner: user). |
 | SEC-4 | 🟡 Low | **Unauthenticated `GET`/`DELETE /api/history`** — anyone could read/clear a thread's conversation. | **Fixed** — gated to the admin token. |
@@ -31,25 +31,17 @@ SQL/NoSQL injection · SSRF to internal services.
 
 ---
 
-## TODO — owner: **user** (do in the Cloudflare dashboard)
+## Host nginx changes (NOT in git — re-apply if the box/config is rebuilt)
+- `/etc/nginx/conf.d/cloudflare-allowlist.conf` — `geo $realip_remote_addr $cf_ok { … }`
+  with the current Cloudflare v4+v6 ranges (refresh from <https://www.cloudflare.com/ips/>
+  if CF changes them; stale ranges would 403 real traffic).
+- `/etc/nginx/sites-available/smartmoviesearch.com` — `set_real_ip_from` (v4+v6),
+  `proxy_set_header CF-Connecting-IP $remote_addr;`, and `if ($cf_ok = 0) { return 403; }`.
+  Backups: `*.bak-secaudit`, `*.bak-cflock`.
 
-**SEC-1 — lock the origin to Cloudflare** (do either or both; B is strongest):
-
-**A. Firewall allow-list (quick):** restrict origin port 443 to Cloudflare's published IP
-ranges so direct-to-origin requests are dropped.
-- Cloudflare IP ranges: <https://www.cloudflare.com/ips/>
-- On the OVH host, replace the broad `443 ALLOW` with per-range allows (ufw), e.g. for each
-  CIDR in that list: `sudo ufw allow from <CIDR> to any port 443 proto tcp`, then
-  `sudo ufw delete allow 443/tcp`. (Script it — there are ~15 v4 + ~7 v6 ranges.)
-
-**B. Authenticated Origin Pulls (strongest, no IP list to maintain):**
-- Cloudflare dashboard → SSL/TLS → Origin Server → **Authenticated Origin Pulls** → enable
-  (zone-level), then install Cloudflare's client cert on the origin nginx and add
-  `ssl_client_certificate` + `ssl_verify_client on;` to the `smartmoviesearch.com` server
-  block. Cloudflare docs: search "Authenticated Origin Pulls".
-- This makes nginx reject any TLS connection not bearing Cloudflare's client cert.
-
-**SEC-3 — Anthropic billing guardrails:** console.anthropic.com → set a monthly spend
-limit + usage alerts.
-
-**Optional — also enable Cloudflare Bot Fight Mode** (Security → Bots) for a free extra layer.
+## TODO — owner: **user**
+- **SEC-3 — Anthropic billing guardrails:** console.anthropic.com → set a monthly spend
+  limit + usage alerts. (In-app `DAILY_TOKEN_HARD_CAP` + the 30/day call cap already help.)
+- **Optional hardening:** upgrade Cloudflare SSL from **Flexible → Full (Strict)** (serve the
+  vhost on 443 with an origin cert) and add **Authenticated Origin Pulls** (mTLS) — removes
+  the IP-list maintenance and encrypts CF↔origin. Also consider Cloudflare **Bot Fight Mode**.
