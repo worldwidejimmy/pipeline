@@ -16,7 +16,7 @@ its API, the deployment on the OVH host, and the public `worldwidejimmy/pipeline
 
 | ID | Sev | Finding | Status |
 |----|-----|---------|--------|
-| SEC-1 | 🔴 High | **Origin not locked to Cloudflare.** An attacker who finds the origin IP could hit it directly (CF reaches the origin over HTTP/80, Flexible SSL) with `Host: smartmoviesearch.com`, bypassing Cloudflare's WAF/bot/DDoS and spoofing `CF-Connecting-IP`. | **FIXED 2026-06-27** — (a) nginx overwrites `CF-Connecting-IP` from validated `$remote_addr` (anti-spoof); (b) **Cloudflare-only allow-list**: `geo $realip_remote_addr $cf_ok` (v4+v6) in `conf.d/cloudflare-allowlist.conf` + `if ($cf_ok = 0) { return 403; }` in the vhost. Verified: CF path 200, direct origin 403. **Residual:** Flexible SSL (CF↔origin is HTTP) — optional upgrade to Full(Strict)+443+AOP. |
+| SEC-1 | 🔴 High | **Origin not locked to Cloudflare.** An attacker who finds the origin IP could hit it directly (CF reaches the origin over HTTP/80, Flexible SSL) with `Host: smartmoviesearch.com`, bypassing Cloudflare's WAF/bot/DDoS and spoofing `CF-Connecting-IP`. | **FIXED 2026-06-27** — **mTLS (Authenticated Origin Pulls)**: origin on 443 with a CF Origin cert, Cloudflare in **Full (Strict)** + AOP **Global**, nginx `ssl_verify_client on`. Only Cloudflare (valid client cert) can reach the app; direct origin → 400, port 80 → 301. The earlier IP allow-list was retired (no more IP-range maintenance). Plus the `CF-Connecting-IP` anti-spoof overwrite. |
 | SEC-2 | 🟠 Med | **Docker ports on `0.0.0.0`** — `8001` (backend), `5174` (frontend), `5160` (Attu, the Milvus **admin UI, no auth**), `19530` (Milvus DB, no auth). Docker's iptables bypass ufw. External probes currently get `ECONNREFUSED` (OVH edge likely blocks), but it's undocumented/fragile; if ever reachable → full vector-DB read/wipe. | **Fixed** — all bound to `127.0.0.1` in `docker-compose.yml`. |
 | SEC-3 | 🟠 Med-High | **Financial DoS** on the paid Anthropic key. Open LLM access; per-IP cap is bypassable (SEC-1) and IP-rotatable. No global daily spend ceiling. | **Fixed (app side)** — `DAILY_TOKEN_HARD_CAP` kill-switch pauses the LLM when exceeded. **Set a billing limit + alerts in the Anthropic console** (owner: user). |
 | SEC-4 | 🟡 Low | **Unauthenticated `GET`/`DELETE /api/history`** — anyone could read/clear a thread's conversation. | **Fixed** — gated to the admin token. |
@@ -32,12 +32,20 @@ SQL/NoSQL injection · SSRF to internal services.
 ---
 
 ## Host nginx changes (NOT in git — re-apply if the box/config is rebuilt)
-- `/etc/nginx/conf.d/cloudflare-allowlist.conf` — `geo $realip_remote_addr $cf_ok { … }`
-  with the current Cloudflare v4+v6 ranges (refresh from <https://www.cloudflare.com/ips/>
-  if CF changes them; stale ranges would 403 real traffic).
-- `/etc/nginx/sites-available/smartmoviesearch.com` — `set_real_ip_from` (v4+v6),
-  `proxy_set_header CF-Connecting-IP $remote_addr;`, and `if ($cf_ok = 0) { return 403; }`.
-  Backups: `*.bak-secaudit`, `*.bak-cflock`.
+Origin is now locked to Cloudflare by **mTLS (Authenticated Origin Pulls)** — the IP
+allow-list was retired (2026-06-27).
+- Cloudflare side: SSL/TLS mode **Full (Strict)** + **Authenticated Origin Pulls → Global**
+  (uses CF's shared client cert; no upload).
+- `/etc/ssl/sms-origin-cert.pem` + `sms-origin-key.pem` — Cloudflare **Origin** cert (the
+  origin's server cert for Full Strict; covers `*.smartmoviesearch.com`, expires 2041).
+- `/etc/nginx/ssl/cloudflare-origin-pull-ca.pem` — CF's origin-pull CA (verifies CF's client
+  cert). Public download: developers.cloudflare.com/ssl/static/authenticated_origin_pull_ca.pem
+- `/etc/nginx/sites-available/smartmoviesearch.com` vhost: `listen 443 ssl` with the origin
+  cert/key, `ssl_client_certificate <CA>` + **`ssl_verify_client on`** (enforces mTLS),
+  `set_real_ip_from` (v4+v6) + `proxy_set_header CF-Connecting-IP $remote_addr` (anti-spoof),
+  and `if ($server_port = 80) { return 301 https://… }` (port 80 unused by CF). Backups:
+  `*.bak-secaudit`, `*.bak-cflock`, `*.bak-aop`, `*.bak-enforce`.
+- **This box needs `systemctl reload nginx` run twice** for config to fully apply.
 
 ## TODO — owner: **user**
 - **SEC-3 — Anthropic billing guardrails:** console.anthropic.com → set a monthly spend
