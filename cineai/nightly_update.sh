@@ -33,7 +33,7 @@ echo "════════ nightly RAG update @ $TS ════════
 
 # 1. Discover + scrape reviews archived in the last year (refreshes CDX cache).
 echo "── scrape ─────────────────────────────────"
-docker compose exec -T backend python3 scripts/scrape_ebert.py --refresh-recent 1
+docker compose exec -T backend python3 scripts/scrape_ebert.py --refresh-recent 1 --limit 800
 
 # 2. Ingest only the new reviews (skip-existing + amp dedup keep it clean).
 echo "── ingest ─────────────────────────────────"
