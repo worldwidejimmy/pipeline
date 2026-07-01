@@ -7,7 +7,9 @@ space, backup freshness, origin-cert expiry, and the last nightly-ingest result.
 Emails via send_email.py (which no-ops if SMTP isn't configured). Run: ./devops_check.py
 """
 import glob
+import json
 import os
+import sys
 import shutil
 import subprocess
 import time
@@ -16,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent          # cineai/
+os.chdir(HERE)  # cron runs from $HOME; cd so `docker compose` finds the project
 issues = []
 R = []
 
@@ -123,4 +126,16 @@ else:
 
 report = "\n".join(R)
 print(report)
-subprocess.run([str(HERE / "send_email.py"), subject], input=report, text=True)
+
+# Persist for triage: full report per run + append-only JSON history.
+OPS = HERE / "backend" / "data" / "ops-logs"
+OPS.mkdir(parents=True, exist_ok=True)
+stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+(OPS / f"devops-{stamp}.log").write_text(report + "\n")
+with (OPS / "devops-history.jsonl").open("a") as f:
+    f.write(json.dumps({"ts": stamp, "ok": not issues, "issues": issues}) + "\n")
+for old_log in sorted(OPS.glob("devops-*.log"))[:-60]:   # keep last 60 reports
+    old_log.unlink(missing_ok=True)
+
+if "--no-email" not in sys.argv:
+    subprocess.run([str(HERE / "send_email.py"), subject], input=report, text=True)
