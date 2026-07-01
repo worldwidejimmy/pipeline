@@ -32,7 +32,10 @@ This document is for anyone taking over the **movie, TV, and music** multi-agent
 | `cineai/backend/scripts/ingest_ebert.py` | JSONL → chunked embeddings → Milvus **append** |
 | `cineai/backend/docs/` | Curated markdown corpus (decades, directors, TV, music, etc.) |
 | `cineai/backend/data/` | **Gitignored** generated files: `ebert_urls.json`, `ebert_reviews.jsonl`, `scrape.log`, `nightly-logs/`. **Volume-mounted** into the backend container (so ingest/cron can read it). |
-| `cineai/nightly_update.sh` | **Nightly RAG refresh** — discovers + scrapes new reviews, ingests only the new ones (idempotent). Run via cron. |
+| `cineai/nightly_update.sh` | **Nightly RAG refresh** — scrape (capped `--limit 800`) + ingest new reviews; emails a summary when it adds any. |
+| `cineai/backup.sh` | **Nightly backup** — tars `.env` + `data/` to `~/backups/smartmoviesearch` (keeps 14). Milvus is derived; restore via `ingest_ebert.py`. |
+| `cineai/devops_check.py` | **Nightly DevOps health check** — containers/app/disk/mem/backup/cert/ingest → emails 🟢/🔴 report. |
+| `cineai/send_email.py` | Shared SMTP notifier (reads `SMTP_*`/`ADMIN_EMAIL` from `backend/.env`; no-ops if unset). |
 | `cineai/frontend/src/components/RoutingRulesModal.tsx` | **Rules** UI (loads `/api/rules`) |
 | `cineai/frontend/src/components/{UsageBadge,CompareView,PasswordGate}.tsx` | Token meter + free-quota chip; RAG compare two-column view; optional sign-in modal |
 
@@ -68,15 +71,21 @@ This document is for anyone taking over the **movie, TV, and music** multi-agent
    - Optional: `--limit N`.
    - Current state: **~12,636 distinct reviews / ~99k chunks** ingested (37 markdown docs add ~539 more).
 
-### Nightly auto-refresh
+### Nightly automation (INSTALLED) + notifications
 
-`cineai/nightly_update.sh` runs `scrape_ebert.py --refresh-recent 1` (re-queries the CDX for the current year to discover newly-archived reviews — the URL cache is otherwise never refreshed, and the old year range stopped at 2025) then `ingest_ebert.py --skip-existing`. Idempotent and flock-guarded; logs to `data/nightly-logs/`.
-
-Install the cron (3:30 ET nightly) — **not auto-installed**:
+Three cron jobs run nightly in the `ubuntu` crontab (**UTC**, quiet US hours; the crontab is not in git):
 
 ```
-30 3 * * * /home/ubuntu/Code/pipeline/cineai/nightly_update.sh >> /tmp/sms-nightly-cron.log 2>&1
+CRON_TZ=UTC
+0  8 * * *  cineai/nightly_update.sh   # RAG refresh: scrape --refresh-recent 1 --limit 800, then ingest_ebert.py --skip-existing
+0  9 * * *  cineai/backup.sh           # tar .env + data/ → ~/backups/smartmoviesearch (keep 14)
+15 9 * * *  cineai/devops_check.py      # health report email
 ```
+
+- **Ingest** is idempotent + flock-guarded; logs to `data/nightly-logs/`. `--limit 800` bounds it to a ~25-min run that chips at the backlog; failed Wayback URLs are recorded in `data/ebert_failed_urls.json` and skipped on future runs. Emails a summary **only when it adds** review chunks.
+- **DevOps check** runs on the host (no sudo), reads live state, and emails 🟢/🔴.
+- **Email** is via `send_email.py` using `SMTP_*` + `ADMIN_EMAIL` in `backend/.env` (currently reuses the Brevo relay; From/To point at `admin@dailystockbot.com` until changed). Host scripts read `.env` live — no restart needed to change SMTP settings.
+- **Docker log rotation** is set in `docker-compose.yml` (`x-logging`: 10m × 3) — applies on each container's next recreate.
 
 ---
 
