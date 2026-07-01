@@ -29,6 +29,7 @@ from bs4 import BeautifulSoup
 
 OUT_FILE  = Path(__file__).parent.parent / "data" / "ebert_reviews.jsonl"
 URLS_FILE = Path(__file__).parent.parent / "data" / "ebert_urls.json"
+FAILED_FILE = Path(__file__).parent.parent / "data" / "ebert_failed_urls.json"
 DELAY     = 1.2    # seconds between archive fetches — be polite
 TIMEOUT   = 25
 HEADERS   = {"User-Agent": "Mozilla/5.0 (compatible; academic-research-bot/1.0)"}
@@ -235,9 +236,20 @@ def main() -> None:
                     pass
         print(f"Resuming: {len(done)} reviews already saved")
 
+    # URLs that previously failed to scrape (dead Wayback snapshots) — skip them so
+    # each run spends its budget on untried URLs, not the same failures every night.
+    failed: set[str] = set()
+    if FAILED_FILE.exists():
+        try:
+            failed = set(json.loads(FAILED_FILE.read_text()))
+        except Exception:
+            failed = set()
+    if failed:
+        print(f"  ({len(failed)} previously-failed URLs will be skipped)")
+
     url_map = fetch_cdx_urls(refresh_recent=args.refresh_recent)
     with httpx.Client() as client:
-        todo    = [(u, ts) for u, ts in url_map.items() if u not in done]
+        todo    = [(u, ts) for u, ts in url_map.items() if u not in done and u not in failed]
 
         if args.limit:
             todo = todo[:args.limit]
@@ -258,9 +270,15 @@ def main() -> None:
                     print(f"  [{i}/{len(todo)}] ✓ {review['title']!r} ({review['year']}) {stars}")
                 else:
                     skipped += 1
+                    failed.add(norm_url)
                     print(f"  [{i}/{len(todo)}] ⚠ skipped: {norm_url}")
 
                 time.sleep(DELAY)
+
+    try:
+        FAILED_FILE.write_text(json.dumps(sorted(failed)))
+    except Exception:
+        pass
 
     total = len(done) + saved
     print(f"\n✓ Done — {ok} saved, {skipped} skipped → {OUT_FILE}")
