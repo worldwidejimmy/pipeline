@@ -41,5 +41,20 @@ docker compose exec -T backend python3 scripts/ingest_ebert.py --skip-existing
 
 echo "════════ done @ $(date -u +%Y%m%dT%H%M%SZ) ════════"
 
+# 3. Email the admin a summary — only if new reviews were actually ingested.
+ADDED=$(tr '\r' '\n' < "$LOG" | grep -oE '[0-9]+ chunks added' | tail -1 | grep -oE '[0-9]+' || true)
+SCRAPED=$(tr '\r' '\n' < "$LOG" | grep -cE "\] \xe2\x9c\x93 '" || true)
+if [ "${ADDED:-0}" -gt 0 ] 2>/dev/null; then
+  {
+    echo "SmartMovieSearch nightly ingest — $TS"
+    echo
+    echo "New reviews scraped tonight : ${SCRAPED:-0}"
+    echo "New chunks added to vector DB: ${ADDED}"
+    echo
+    echo "--- run summary ---"
+    tr '\r' '\n' < "$LOG" | grep -iE 'reviews loaded|already present|chunks to embed|chunks added|total in Milvus|Refreshing|new this pass' | tail -12
+  } | /home/ubuntu/Code/pipeline/cineai/send_email.py "🎬 SmartMovieSearch: +${ADDED} review chunks tonight" || true
+fi
+
 # Keep the log dir tidy.
 find "$LOG_DIR" -name 'nightly-*.log' -mtime +30 -delete 2>/dev/null || true
