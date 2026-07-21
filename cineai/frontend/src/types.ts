@@ -5,7 +5,11 @@ export type AgentName =
   | 'tmdb_agent'
   | 'rag_agent'
   | 'search_agent'
-  | 'synthesise';
+  | 'synthesise'
+  // compare-mode pseudo-agents (RAG vs no-RAG demo)
+  | 'rag_answer'
+  | 'base_answer'
+  | 'judge';
 
 export type RoutingDecision =
   | 'tmdb' | 'rag' | 'search'
@@ -175,4 +179,7 @@ export const AGENT_META: Record<AgentName, { label: string; color: string; icon:
   rag_agent:        { label: 'RAG Agent',    color: '#3b82f6', icon: '🔍' },
   search_agent:     { label: 'Web Search',   color: '#f97316', icon: '🌐' },
   synthesise:       { label: 'Synthesiser',  color: '#eab308', icon: '✨' },
+  rag_answer:       { label: 'With RAG',     color: '#3b82f6', icon: '🔍' },
+  base_answer:      { label: 'Without RAG',  color: '#a855f7', icon: '🧠' },
+  judge:            { label: 'Blind Judge',  color: '#eab308', icon: '⚖️' },
 };

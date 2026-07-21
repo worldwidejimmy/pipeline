@@ -218,7 +218,8 @@ There is also a Playwright browser test of the whole running stack (`tests/e2e.m
 
 ```bash
 make test-e2e          # installs playwright + chromium on first run
-E2E_LIVE=1 make test-e2e   # additionally checks https://smartmoviesearch.com through Cloudflare
+E2E_LIVE=1 make test-e2e      # additionally checks https://smartmoviesearch.com through Cloudflare
+E2E_COMPARE=1 make test-e2e   # additionally runs compare mode (1 more search, ~3 LLM calls)
 ```
 
 It exercises the real UI end to end — homepage, trending, a full agent-pipeline search

@@ -1,6 +1,6 @@
 # Multi-Agent Research Pipeline
 
-> 🚀 **Live demo:** [smartmoviesearch.com](https://smartmoviesearch.com) — open access, no login. Each visitor gets a few free searches per hour (the header shows remaining searches and the day's token usage); the access password lifts the limit and unlocks an admin view. Try the **🆚 Compare RAG vs. no-RAG** toggle to see grounded vs. ungrounded answers side by side. Powered by **Anthropic Claude** (default tier: Haiku); the ⚙️ status button shows live service health.
+> 🚀 **Live demo:** [smartmoviesearch.com](https://smartmoviesearch.com) — open access, no login. Each visitor gets a few free searches per hour (the header shows remaining searches and the day's token usage); the access password lifts the limit and unlocks an admin view. Try the **🆚 Compare RAG vs. no-RAG** toggle to see grounded vs. ungrounded answers side by side — a **blind LLM judge** then rules on which answer is stronger (it isn't told which used retrieval; the mapping is revealed after the verdict), and the AI-Pipeline panel shows the compare run's own graph, timeline, and events. Powered by **Anthropic Claude** (default tier: Haiku); the ⚙️ status button shows live service health.
 
 A production agentic RAG system built with **LangGraph + Milvus**, deployed as [SmartMovieSearch](https://smartmoviesearch.com) — a natural-language movie intelligence platform.
 

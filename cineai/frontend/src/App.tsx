@@ -68,6 +68,8 @@ export default function App() {
   const [cmpChunks, setCmpChunks] = useState<RagChunk[]>([])
   const [cmpRagTokens,  setCmpRagTokens]  = useState<CompareTokens | null>(null)
   const [cmpBaseTokens, setCmpBaseTokens] = useState<CompareTokens | null>(null)
+  const [cmpJudge,      setCmpJudge]      = useState('')
+  const [cmpJudgeASide, setCmpJudgeASide] = useState<'rag' | 'base' | null>(null)
 
   const refreshUsage = useCallback(() => {
     fetchUsage().then(setUsage).catch(() => {})
@@ -113,6 +115,7 @@ export default function App() {
     setCompareActive(false)
     setCmpRag(''); setCmpBase('')
     setCmpChunks([]); setCmpRagTokens(null); setCmpBaseTokens(null)
+    setCmpJudge(''); setCmpJudgeASide(null)
   }, [])
 
   const startNewConversation = useCallback(() => {
@@ -228,14 +231,28 @@ export default function App() {
     setCompareActive(true)
     setCmpRag(''); setCmpBase('')
     setCmpChunks([]); setCmpRagTokens(null); setCmpBaseTokens(null)
+    setCmpJudge(''); setCmpJudgeASide(null)
     setTurnNum(p => p + 1)
 
-    let rag = '', base = ''
+    let rag = '', base = '', judge = ''
     const url = makeSSEUrl(`/api/compare?q=${encodeURIComponent(q.trim())}`)
     const es = new EventSource(url)
     esRef.current = es
 
+    const addEvent = (type: string, e: MessageEvent) => {
+      try {
+        const payload = JSON.parse(e.data)
+        setEvents(prev => [...prev, { ...payload, type }])
+      } catch { /* ignore parse errors */ }
+    }
+
+    // Standard pipeline events → observability panel (graph/timeline/log/metrics)
+    for (const t of ['pipeline_start', 'agent_start', 'agent_end', 'llm_start', 'llm_end', 'done']) {
+      es.addEventListener(t, e => addEvent(t, e as MessageEvent))
+    }
+
     es.addEventListener('chunks_retrieved', (e: MessageEvent) => {
+      addEvent('chunks_retrieved', e)
       try { setCmpChunks(JSON.parse(e.data).chunks ?? []) } catch { /* ignore */ }
     })
     es.addEventListener('compare_token', (e: MessageEvent) => {
@@ -247,6 +264,15 @@ export default function App() {
       const p = JSON.parse(e.data)
       const t = { prompt_tokens: p.prompt_tokens, completion_tokens: p.completion_tokens }
       if (p.side === 'rag') setCmpRagTokens(t); else setCmpBaseTokens(t)
+    })
+    es.addEventListener('judge_start', (e: MessageEvent) => {
+      try { setCmpJudgeASide(JSON.parse(e.data).a_side ?? null) } catch { /* ignore */ }
+    })
+    es.addEventListener('judge_token', (e: MessageEvent) => {
+      try {
+        judge += JSON.parse(e.data).content ?? ''
+        setCmpJudge(judge)
+      } catch { /* ignore */ }
     })
     es.addEventListener('compare_done', () => {
       setStream(false); es.close(); refreshUsage()
@@ -570,6 +596,8 @@ export default function App() {
                 chunks={cmpChunks}
                 ragTokens={cmpRagTokens}
                 baseTokens={cmpBaseTokens}
+                judgeText={cmpJudge}
+                judgeASide={cmpJudgeASide}
                 streaming={isStreaming}
               />
             </div>
