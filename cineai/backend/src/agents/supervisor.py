@@ -5,6 +5,8 @@ questions so routing stays coherent across turns.
 """
 from __future__ import annotations
 
+import re
+
 from langchain_core.messages import HumanMessage, SystemMessage
 from src.llm import get_chat
 
@@ -122,6 +124,11 @@ async def supervisor_route_node(state: dict) -> dict:
     raw = response.content.strip().lower()
     valid = {"tmdb", "rag", "search", "music", "tmdb+rag", "tmdb+search", "tmdb+music",
              "music+search", "rag+search", "all"}
-    routing = raw if raw in valid else "tmdb+rag"
+    routing = raw if raw in valid else None
+    if routing is None:
+        # Tolerate wrapping (fences, quotes, a chatty preamble): find any valid
+        # token in the reply, preferring combos over their single-agent prefixes.
+        tokens = re.findall(r"[a-z]+(?:\+[a-z]+)?", raw)
+        routing = next((t for t in sorted(tokens, key=len, reverse=True) if t in valid), "tmdb+rag")
 
     return {"routing": routing}
