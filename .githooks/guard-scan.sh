@@ -42,7 +42,11 @@ while IFS= read -r f; do
 done < <(git diff --name-only --diff-filter=ACMR "$@")
 
 # ── 2. Secret-format patterns in ADDED lines ──────────────────────────────────
-added=$(git diff -U0 --diff-filter=ACMR "$@" | grep -E '^\+' | grep -vE '^\+\+\+' || true)
+# .githooks/ is excluded from the FORMAT checks only (its detection patterns would
+# match themselves); private patterns and filename rules still cover it.
+added=$(git diff -U0 --diff-filter=ACMR "$@" -- ':(top,exclude).githooks' ':(top)' \
+        | grep -E '^\+' | grep -vE '^\+\+\+' || true)
+added_all=$(git diff -U0 --diff-filter=ACMR "$@" | grep -E '^\+' | grep -vE '^\+\+\+' || true)
 
 check() {  # check <description> <extended-regex>
   local hits
@@ -73,12 +77,30 @@ if [ -n "$cred_hits" ]; then
   printf '%s\n' "$cred_hits" | sed 's/^/    /' >&2
 fi
 
+# ── 2b. Personal information (PII) in ADDED lines ─────────────────────────────
+# Email addresses — anything outside the allowlist of intentionally-public /
+# placeholder addresses is treated as personal info.
+email_allow='users\.noreply\.github\.com|@example\.com|@yourdomain\.com|@smartmoviesearch\.com|@anthropic\.com|noreply@'
+email_hits=$(printf '%s\n' "$added" \
+  | grep -nE -- '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' \
+  | grep -ivE "$email_allow" | head -3 || true)
+if [ -n "$email_hits" ]; then
+  say "email address not on the public allowlist (personal info?):"
+  printf '%s\n' "$email_hits" | sed 's/^/    /' >&2
+fi
+
+# Phone-number formats (US-style; word-bounded to avoid version strings)
+check "phone-number-looking string"  '\([0-9]{3}\) ?[0-9]{3}[-. ][0-9]{4}|(^|[^0-9.-])[0-9]{3}[-.][0-9]{3}[-.][0-9]{4}([^0-9.-]|$)|\+1[ .-]?[0-9]{3}[ .-]?[0-9]{3}[ .-]?[0-9]{4}'
+
+# Box-default / hostname-revealing identities anywhere in content
+check "server-identifying account/hostname" 'ubuntu@vps|root@vps|@vps-[0-9a-f]+|\.vps\.ovh\.'
+
 # ── 3. Private local patterns (kept OUTSIDE the repo) ─────────────────────────
 priv="$HOME/.config/sms-repo-guard/patterns.txt"
 if [ -f "$priv" ]; then
   while IFS= read -r p; do
     case "$p" in ''|'#'*) continue ;; esac
-    hits=$(printf '%s\n' "$added" | grep -inE "$p" | head -3 || true)
+    hits=$(printf '%s\n' "$added_all" | grep -inE -- "$p" | head -3 || true)
     if [ -n "$hits" ]; then
       say "matches a private pattern (see $priv):"
       printf '%s\n' "$hits" | sed 's/^/    /' >&2
