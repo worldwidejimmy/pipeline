@@ -7,6 +7,8 @@ optional Roger Ebert reviews, **TMDB**, **Music**/MusicBrainz, **Web Search**) a
 streaming answer. The app lives under `cineai/`.
 
 > ⚠️ **This is a PUBLIC GitHub repo** (`worldwidejimmy/pipeline`) — one of the few public ones. Assume every commit, message, diff, and author identity is world-visible. **Never commit secrets/keys/`.env`.** Commit with a real name/email (not the box default `ubuntu@<vps-host>`), and avoid leaking internal URLs/hostnames in commit trailers.
+>
+> **Guardrails are installed and mandatory:** `.githooks/` (pre-commit + pre-push) scans every outgoing change for secret formats, forbidden file types, and private patterns from `~/.config/sms-repo-guard/patterns.txt` (names/domains/server IPs — kept outside the repo so the blocklist itself stays private). After a fresh clone, re-enable with `git config core.hooksPath .githooks`. **Never bypass with `--no-verify`, weaken the scanner, or edit the private patterns file unless the owner explicitly asks** — a hook block is a hard stop: report it, don't work around it.
 
 ## Source-of-truth docs — read before touching an area, update after
 - `cineai/HANDOFF.md` — operational detail: Ebert-review scraping, routing-rules API, git conventions for generated data — **start here**

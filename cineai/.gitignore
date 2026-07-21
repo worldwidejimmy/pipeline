@@ -17,3 +17,4 @@ frontend/dist/
 # Generated / scraped RAG data (regenerate: see HANDOFF.md)
 backend/data/*
 !backend/data/.gitkeep
+.tests-venv/
