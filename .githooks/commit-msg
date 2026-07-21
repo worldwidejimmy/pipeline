@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Scan the commit MESSAGE too — private info can leak via messages, not just diffs.
+# Checks the same private patterns file as guard-scan.sh, plus server-identifying
+# strings. $1 = path to the message file.
+set -u
+msg_file="$1"
+fail=0
+
+if grep -qE 'ubuntu@vps|@vps-[0-9a-f]+|\.vps\.ovh\.' "$msg_file"; then
+  echo "🛑 public-repo guard (commit-msg): message contains a server-identifying string." >&2
+  fail=1
+fi
+
+priv="$HOME/.config/sms-repo-guard/patterns.txt"
+if [ -f "$priv" ]; then
+  while IFS= read -r p; do
+    case "$p" in ''|'#'*) continue ;; esac
+    if grep -iqE -- "$p" "$msg_file"; then
+      echo "🛑 public-repo guard (commit-msg): message matches a private pattern (see $priv)." >&2
+      fail=1
+    fi
+  done < "$priv"
+fi
+
+[ "$fail" -ne 0 ] && echo "   This repo is public — reword the commit message." >&2
+exit "$fail"

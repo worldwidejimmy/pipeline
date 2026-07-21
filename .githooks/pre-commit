@@ -1,3 +1,23 @@
 #!/usr/bin/env bash
 # Scan the staged diff before every commit — this repo is PUBLIC.
-exec "$(dirname "$0")/guard-scan.sh" pre-commit -- --cached
+set -u
+here="$(cd "$(dirname "$0")" && pwd)"
+
+# Commit-identity guard: commits here carry the approved public identity only.
+# The approved value lives OUTSIDE the repo (~/.config/sms-repo-guard/identity.txt,
+# format: Name <email>). Without it we still block box-default identities.
+ident="$(git config user.name) <$(git config user.email)>"
+approved_file="$HOME/.config/sms-repo-guard/identity.txt"
+if [ -f "$approved_file" ]; then
+  approved="$(head -1 "$approved_file")"
+  if [ "$ident" != "$approved" ]; then
+    echo "🛑 public-repo guard: commit identity '$ident' is not the approved public identity." >&2
+    echo "   Fix with: git config user.name/user.email (see $approved_file)" >&2
+    exit 1
+  fi
+elif printf '%s' "$ident" | grep -qE 'ubuntu@|root@|@vps|\.vps\.ovh\.|localhost'; then
+  echo "🛑 public-repo guard: commit identity '$ident' looks like a box default — set a real public identity." >&2
+  exit 1
+fi
+
+exec "$here/guard-scan.sh" pre-commit -- --cached
