@@ -109,6 +109,34 @@ try {
 } catch (e) { fail('search flow', String(e).slice(0, 200)) }
 await page.screenshot({ path: SHOT('2-search-result') })
 
+// ── 4b. Compare mode: RAG vs no-RAG + blind judge (opt-in: E2E_COMPARE=1) ────
+if (process.env.E2E_COMPARE === '1') {
+  console.log('\n[4b] Compare mode (costs 1 more search + ~3 LLM calls)')
+  try {
+    await page.click('.compare-toggle')
+    await page.fill('.query-input', "Christopher Nolan's directing style")
+    await page.click('.query-btn')
+    await page.waitForSelector('.obs-badge.live', { timeout: 15000 })
+    await page.waitForSelector('.obs-badge.live', { state: 'detached', timeout: 180000 })
+    const rag = await page.locator('.cmp-col').first().innerText()
+    const base = await page.locator('.cmp-col').nth(1).innerText()
+    rag.length > 200 && base.length > 200
+      ? pass('both sides answered', `rag ${rag.length} / base ${base.length} chars`)
+      : fail('compare sides', `rag ${rag.length} / base ${base.length} chars`)
+    const judge = await page.locator('.cmp-judge').innerText()
+    const verdict = /verdict/i.test(judge) && /reveal/i.test(judge)
+    verdict ? pass('blind judge verdict + reveal rendered') : fail('judge panel', judge.slice(0, 120))
+    const graph = await page.locator('.pipeline-graph').innerText()
+    /Blind Judge/.test(graph) ? pass('compare pipeline graph rendered') : fail('compare graph', graph.slice(0, 120))
+    const metrics = await page.locator('.metrics-bar').innerText()
+    /3/.test(metrics) ? pass('metrics show LLM calls', metrics.replace(/\n/g, ' ').slice(0, 80)) : fail('compare metrics', metrics.slice(0, 80))
+    await page.screenshot({ path: SHOT('5-compare') })
+    await page.click('.compare-toggle')          // back to normal mode
+    await page.click('text=+ New Search')
+    await page.waitForTimeout(500)
+  } catch (e) { fail('compare mode', String(e).slice(0, 200)) }
+}
+
 // ── 5. Observability tabs ────────────────────────────────────────────────────
 console.log('\n[5] Observability tabs')
 try {

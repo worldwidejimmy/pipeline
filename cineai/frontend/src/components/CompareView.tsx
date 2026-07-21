@@ -8,6 +8,8 @@ interface Props {
   chunks: RagChunk[]
   ragTokens: CompareTokens | null
   baseTokens: CompareTokens | null
+  judgeText: string
+  judgeASide: 'rag' | 'base' | null
   streaming: boolean
 }
 
@@ -38,7 +40,7 @@ function Column(props: {
   )
 }
 
-export function CompareView({ question, ragText, baseText, chunks, ragTokens, baseTokens, streaming }: Props) {
+export function CompareView({ question, ragText, baseText, chunks, ragTokens, baseTokens, judgeText, judgeASide, streaming }: Props) {
   return (
     <div className="compare-view">
       <div className="cmp-banner">
@@ -64,6 +66,29 @@ export function CompareView({ question, ragText, baseText, chunks, ragTokens, ba
           text={baseText} tokens={baseTokens} streaming={streaming}
         />
       </div>
+
+      {(judgeASide !== null || judgeText) && (
+        <div className="cmp-judge" style={{ borderTopColor: '#eab308' }}>
+          <div className="cmp-col-head">
+            <span className="cmp-col-title"><span>⚖️</span> Blind AI Judge</span>
+            <span className="cmp-col-sub">
+              sees both answers in random order — NOT told which used RAG
+            </span>
+          </div>
+          <div className="cmp-col-body answer-content">
+            {judgeText
+              ? <ReactMarkdown>{judgeText}</ReactMarkdown>
+              : <span className="cmp-thinking">deliberating<span className="loading-dots"><span>.</span><span>.</span><span>.</span></span></span>}
+            {streaming && judgeText && <span className="cursor-blink" />}
+          </div>
+          {judgeASide !== null && (
+            <div className="cmp-col-foot">
+              🔓 Reveal: Answer A = {judgeASide === 'rag' ? '🔍 With RAG' : '🧠 Without RAG'} ·
+              {' '}Answer B = {judgeASide === 'rag' ? '🧠 Without RAG' : '🔍 With RAG'}
+            </div>
+          )}
+        </div>
+      )}
 
       {chunks.length > 0 && (
         <details className="cmp-sources">
