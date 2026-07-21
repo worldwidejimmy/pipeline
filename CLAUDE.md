@@ -21,10 +21,11 @@ streaming answer. The app lives under `cineai/`.
 
 ## Build / test / run
 - Run stack: `cd cineai && docker compose up -d`; inspect: `docker compose ps` / `docker compose logs -f <svc>`.
-- Tasks/tests: `cineai/Makefile` — run `make` to list targets.
+- Tasks/tests: `cineai/Makefile` — run `make` to list targets. `make test-e2e` = Playwright browser test of the running stack (costs 1 search + tokens).
 - `cineai/devops_check.py` — health/devops checks · `cineai/backup.sh` — backups.
 
 ## Gotchas
 - **Real client IP: use `CF-Connecting-IP`.** The frontend nginx clobbers `X-Real-IP` (see the `client-ip-chain` memory).
 - **Anthropic-powered** — consult the `claude-api` skill before changing model ids or LLM-call shape.
+- **Parsing LLM JSON: always use `src/llm.py:parse_llm_json`**, never bare `json.loads` — Claude wraps "JSON only" replies in ```json fences, and a silent except-fallback degrades answers without any error (this broke TMDB title lookups for weeks).
 - Shared VPS: unrelated apps run on this box — never wildcard-kill node/npm/python (kill by PID or use the app's own restart), and don't touch services you didn't start. (Server-wide rule in `~/.claude/CLAUDE.md`.)

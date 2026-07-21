@@ -207,6 +207,19 @@ curl "http://localhost:8001/api/search?q=inception"
 curl -N "http://localhost:8001/api/query?q=show+me+good+heist+movies&thread_id=test1"
 ```
 
+There is also a Playwright browser test of the whole running stack (`tests/e2e.mjs`):
+
+```bash
+make test-e2e          # installs playwright + chromium on first run
+E2E_LIVE=1 make test-e2e   # additionally checks https://smartmoviesearch.com through Cloudflare
+```
+
+It exercises the real UI end to end — homepage, trending, a full agent-pipeline search
+with SSE streaming (costs 1 free-quota search + real Claude tokens), usage accounting,
+modals, theme — and verifies the anti-bot guard rejects headless user agents. Note when
+writing new checks: the backend blocks `HeadlessChrome` UAs, so the suite spoofs a real
+browser UA for everything except the dedicated anti-bot test case.
+
 ### 6. Build and deploy frontend
 
 ```bash

@@ -60,6 +60,9 @@ setup: setup-venv setup-frontend ## Install all dependencies (dev mode)
 
 # ── Testing ───────────────────────────────────────────────────────────────────
 
+test-e2e: ## Playwright browser test of the running stack (costs 1 search + tokens; E2E_LIVE=1 adds a live-site check)
+	cd tests && npm install --no-audit --no-fund && npx playwright install chromium && node e2e.mjs
+
 test-api: ## Smoke test the running backend API
 	@echo "=== Health check ===" && curl -sf http://localhost:8001/api/health | python3 -m json.tool
 	@echo "\n=== Movie search ===" && curl -sf "http://localhost:8001/api/search?q=inception" | python3 -m json.tool | head -20

@@ -12,7 +12,7 @@ import asyncio
 import json
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from src.llm import get_chat
+from src.llm import get_chat, parse_llm_json
 
 from src.config import get_config
 from src.tools import tmdb_client
@@ -112,9 +112,12 @@ async def tmdb_agent_node(state: dict) -> dict:
     ])
 
     try:
-        intent = json.loads(intent_resp.content.strip())
+        intent = parse_llm_json(intent_resp.content)
     except Exception:
-        intent = {"search_type": "search_movie", "query": question}
+        # Searching TMDB for the raw question rarely matches a title — log it
+        # so a broken extraction shows up in `docker compose logs backend`.
+        print(f"[tmdb_agent] intent extraction unparseable, falling back to raw question: {intent_resp.content[:120]!r}")
+        intent = {"search_type": "search_title", "query": question}
 
     search_type = intent.get("search_type", "search_movie")
 

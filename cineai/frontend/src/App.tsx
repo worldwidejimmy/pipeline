@@ -208,6 +208,7 @@ export default function App() {
       es.close()
       if (currentAnswer) {
         setHistory(prev => [...prev, { q: q.trim(), a: currentAnswer }])
+        setAnswer('')  // the turn lives in history now — keeping it would render twice
       }
       refreshUsage()
     })
@@ -505,9 +506,9 @@ export default function App() {
                         ? <img src={m.poster} alt={m.title} />
                         : <div className="movie-card-poster-placeholder">🎬</div>
                       }
-                      {m.rating && (
+                      {m.rating ? (
                         <div className="movie-card-rating-badge">⭐ {m.rating.toFixed(1)}</div>
-                      )}
+                      ) : null}
                     </div>
                     <div className="movie-card-info">
                       <div className="movie-card-title">{m.title}</div>

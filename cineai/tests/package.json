@@ -1,0 +1,11 @@
+{
+  "name": "smartmoviesearch-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node e2e.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.61.1"
+  }
+}
