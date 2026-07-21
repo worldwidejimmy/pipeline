@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Scan the staged diff before every commit — this repo is PUBLIC.
+exec "$(dirname "$0")/guard-scan.sh" pre-commit -- --cached

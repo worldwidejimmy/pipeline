@@ -207,6 +207,13 @@ curl "http://localhost:8001/api/search?q=inception"
 curl -N "http://localhost:8001/api/query?q=show+me+good+heist+movies&thread_id=test1"
 ```
 
+Backend unit tests (free — no Docker, no API keys; covers `src/usage.py`: quotas,
+caps, blacklist, lockout):
+
+```bash
+make test-unit         # auto-creates backend/.tests-venv (fastapi + pytest) on first run
+```
+
 There is also a Playwright browser test of the whole running stack (`tests/e2e.mjs`):
 
 ```bash

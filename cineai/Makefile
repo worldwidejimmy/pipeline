@@ -60,6 +60,12 @@ setup: setup-venv setup-frontend ## Install all dependencies (dev mode)
 
 # ── Testing ───────────────────────────────────────────────────────────────────
 
+test-unit: ## Backend unit tests (usage.py etc.) — free, no Docker/API keys needed
+	@test -x $(BACKEND_DIR)/.tests-venv/bin/python || \
+		(python3 -m venv $(BACKEND_DIR)/.tests-venv && \
+		 $(BACKEND_DIR)/.tests-venv/bin/pip install -q fastapi pytest)
+	cd $(BACKEND_DIR) && .tests-venv/bin/python -m pytest -q tests/
+
 test-e2e: ## Playwright browser test of the running stack (costs 1 search + tokens; E2E_LIVE=1 adds a live-site check)
 	cd tests && npm install --no-audit --no-fund && npx playwright install chromium && node e2e.mjs
 

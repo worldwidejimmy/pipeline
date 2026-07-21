@@ -42,3 +42,14 @@ logs/
 
 # Docs to ingest (keep sample, ignore personal)
 docs/personal/
+
+# Never publish — key material, archives/backups, local test venvs (public repo!)
+*.pem
+*.key
+*.p12
+*.tgz
+*.tar.gz
+*.age
+id_rsa*
+id_ed25519*
+.tests-venv/
