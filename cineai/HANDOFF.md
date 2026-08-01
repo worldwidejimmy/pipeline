@@ -10,7 +10,7 @@
 
 ## What This Project Is
 
-SmartMovieSearch is a multi-agent movie/TV intelligence platform that answers questions static databases (IMDB, RT) cannot. The core insight: TMDB has no "heist" genre tag — but an LLM knows what a heist film is. The system combines real-time TMDB data, RAG over a movie knowledge corpus, and live web search, then synthesises them with a fast LLM (Groq).
+SmartMovieSearch is a multi-agent movie/TV intelligence platform that answers questions static databases (IMDB, RT) cannot. The core insight: TMDB has no "heist" genre tag — but an LLM knows what a heist film is. The system combines real-time TMDB data, RAG over a movie knowledge corpus, and live web search, then synthesises them with Anthropic Claude.
 
 **The demo query that explains everything:** `"Show me good bank heist movies"`  
 → TMDB searched for Crime/Thriller, RAG retrieves critical analysis of Rififi/Heat/Hell or High Water, web search gets current best-of lists. Synthesiser combines all three into a curated, explained, tone-aware answer no filter UI can produce.
@@ -90,18 +90,18 @@ Browser (port 80/443 via Cloudflare)
     LangGraph StateGraph (compiled with MemorySaver)
          │
     ┌────┴─────────────────────────────────────┐
-    │          supervisor_route               │  ← Groq llama-3.3-70b-versatile
-    │    routes: tmdb|rag|search|combinations │
-    └────┬──────────────┬──────────────┬──────┘
-         │              │              │ (parallel fan-out)
-    tmdb_agent      rag_agent    search_agent
-    TMDB API        Milvus       Tavily API
-    (httpx)         :19530       (optional)
-         │              │              │
-    └────┴──────────────┴──────────────┘
+    │          supervisor_route               │  ← Claude (tier from DEFAULT_MODEL_TIER)
+    │  routes: tmdb|rag|search|music|combos   │
+    └──┬───────────┬───────────┬───────────┬──┘
+       │           │           │           │ (parallel fan-out)
+  tmdb_agent   rag_agent  search_agent  music_agent
+   TMDB API     Milvus     Tavily API   MusicBrainz
+   (httpx)      :19530     (optional)
+       │           │           │           │
+    └──┴───────────┴───────────┴───────────┘
                     │
                synthesise
-              Groq streaming
+              Claude streaming
                     │
               SSE → browser
 ```
@@ -115,8 +115,16 @@ class CineState(TypedDict, total=False):
     tmdb_result:  str     # TMDB agent output
     rag_result:   str     # RAG agent output
     search_result: str    # web search output
+    music_result: str     # music agent output
     answer:   str         # final synthesised answer
 ```
+
+**No reducers.** `CineState` declares plain types, not `Annotated[...]` with merge
+functions. That is safe *only* because each parallel agent writes a different key
+(`tmdb_result`, `rag_result`, `search_result`, `music_result`) and `history` is
+written solely by `synthesise` after the fan-in. If two agents were ever made to
+write the same key in the same superstep, LangGraph would raise on the concurrent
+update — that is the point at which a reducer becomes mandatory.
 
 ### SSE Event Flow (what the frontend receives)
 ```
@@ -128,7 +136,7 @@ agent_end (×N) → done
 
 **Important — LangChain event API (1.2+):** `main.py` listens for `on_chat_model_*`
 events (`on_chat_model_start`, `on_chat_model_stream`, `on_chat_model_end`), NOT the
-old `on_llm_*` names. `BaseChatModel` (ChatGroq) emits the `chat_model` variant; the
+old `on_llm_*` names. `BaseChatModel` (ChatAnthropic) emits the `chat_model` variant; the
 old `on_llm_*` events are only for legacy `BaseLLM` text-completion models. If you
 ever upgrade LangChain and lose streaming, check here first.
 
@@ -138,7 +146,7 @@ ever upgrade LangChain and lose streaming, check here first.
 
 | Key | Where to Get | Cost | Used For |
 |---|---|---|---|
-| `GROQ_API_KEY` | console.groq.com → API Keys | Free tier: 14,400 req/day | LLM inference (all agents) |
+| `ANTHROPIC_API_KEY` | console.anthropic.com → API Keys | Paid — haiku $1/$5, sonnet $3/$15, opus $5/$25 per 1M in/out | LLM inference (all agents) |
 | `TMDB_BEARER_TOKEN` | themoviedb.org → Settings → API | Free | Movie/TV data |
 | `OPENAI_API_KEY` | platform.openai.com | ~$0.02/1M tokens | Embeddings only (text-embedding-3-small) |
 | `TAVILY_API_KEY` | tavily.com | Free: 1000 searches/month | Web search agent (optional) |
@@ -147,7 +155,10 @@ ever upgrade LangChain and lose streaming, check here first.
 
 **Without Tavily:** The web search agent gracefully returns "unavailable" and the other two agents still work fine.
 
-**Without OpenAI:** You can run Ollama locally (`ollama pull nomic-embed-text`) and set `EMBEDDING_PROVIDER=ollama` in `.env`.
+**OpenAI is required for RAG.** `text-embedding-3-small` is the only embedding
+backend implemented — there is no `EMBEDDING_PROVIDER` switch in the code, and the
+collection's dense field is fixed at its 1536 dimensions. Swapping embedders means
+changing the schema and re-ingesting the corpus.
 
 ---
 
@@ -165,7 +176,7 @@ cd pipeline/cineai
 ```bash
 cp backend/.env.example backend/.env
 nano backend/.env
-# Fill in: GROQ_API_KEY, TMDB_BEARER_TOKEN, OPENAI_API_KEY
+# Fill in: ANTHROPIC_API_KEY, TMDB_BEARER_TOKEN, OPENAI_API_KEY
 # Set: MILVUS_URI=http://localhost:19530
 ```
 
@@ -329,8 +340,8 @@ make test-api    # run curl smoke tests against running backend
 - [x] **Error banner** — structured `pipeline_error` SSE events → prominent UI banner (rate limit / auth / connection)
 - [x] **Whitepaper** — `/whitepaper.html` linked from header (📄), light theme daytime styling
 - [x] **Knowledge base modal** — 📚 header button → browse RAG docs by category, click to query
-- [x] **Service status modal** — ⚙️ header button → live Groq/Milvus/TMDB health + API key presence + rate limit countdown
-- [x] **Expanded RAG corpus** — 17 docs / 168 chunks across directors, genres, decades, themes
+- [x] **Service status modal** — ⚙️ header button → live Anthropic/Milvus/TMDB health + API key presence + rate limit countdown
+- [x] **Expanded RAG corpus** — currently **37 markdown docs** under `backend/docs/` across directors, genres, decades and themes, plus the separately-ingested Roger Ebert review corpus. (Chunk count is not tracked here: it changes on every re-ingest and after each nightly Ebert run. Get the live number from the collection rather than this doc.)
 - [x] **movie_and_person TMDB intent** — parallel filmography+movie fetch for comparison queries ("Ryan Gosling's best work?")
 - [x] **Supervisor routing hardened** — single title / person name / "tell me about X" always routes to `tmdb`; tiebreaker: when in doubt prefer `tmdb`
 - [x] **Trending card queries** — click generates `"Tell me about the movie <Title> (<Year>)"` so supervisor never misroutes to RAG
@@ -361,7 +372,7 @@ docker compose exec backend python scripts/ingest.py docs/ --reset
 - [x] ~~**Whitepaper HTML page.**~~ **Done.**
 - [ ] **Streaming tokens in Event Log** — tokens currently only go to answer panel. Add a "Token Stream" sub-view to Event Log tab.
 - [ ] **RAGAS evaluation** — no automated quality measurement. Add `scripts/eval.py` with 20 Q&A pairs covering heist/horror/director queries.
-- [ ] **Redis semantic cache** — repeated queries hit Groq every time. `langchain.cache.RedisSemanticCache` with cosine threshold 0.95.
+- [ ] **Redis semantic cache** — repeated queries hit the Anthropic API every time. `langchain.cache.RedisSemanticCache` with cosine threshold 0.95.
 - [ ] **Watchlist** — PostgreSQL-backed. User saves movies to a named list. Frontend `/watchlist` route.
 - [ ] **IMDb dataset ingest** — `datasets.imdbws.com` has free TSV files (title.basics, title.ratings, title.principals). Ingesting ratings for 10M+ titles would make RAG much richer.
 - [ ] **"Why this recommendation?"** — add an explain mode that shows which sources contributed which facts.
@@ -412,8 +423,25 @@ Turn 3: "What's his latest film?"        → tmdb+search (recent news)
 **Why LangGraph over LangChain LCEL?**
 LangGraph gives explicit state management and conditional fan-out. For multi-agent systems with parallel execution and conversation history, LCEL becomes spaghetti. LangGraph's `MemorySaver` makes multi-turn trivial.
 
-**Why Groq?**
-`llama-3.3-70b-versatile` on Groq is ~10x faster than OpenAI GPT-4o at 1/10th the cost. For a streaming UI where users watch tokens appear, latency matters enormously. Free tier is generous for development. Note: `llama-3.1-70b-versatile` was decommissioned by Groq in early 2025 — use `llama-3.3-70b-versatile`.
+**Why Anthropic Claude, behind a single factory?**
+Every LLM call in the app goes through `backend/src/llm.py:get_chat()`. That one
+choke point means the model tier is a single server-wide setting
+(`DEFAULT_MODEL_TIER` = `haiku` | `sonnet` | `opus`, mapped to concrete model IDs
+in `MODELS`), so switching the entire pipeline's model is an env change plus a
+container recreate — no per-agent edits. Haiku is the default because routing and
+intent extraction are short structured-output calls where the cheap tier is
+sufficient; the tier exists so the expensive models can be switched on for
+side-by-side quality comparison without touching code.
+
+Two implementation details worth remembering:
+- `get_chat()` omits `temperature` for the opus tier — Opus 4.8/4.7 reject
+  sampling params with a 400.
+- `stream_usage=True` is set so `usage_metadata` is populated on *streamed*
+  responses; without it the token meter in `src/usage.py` silently counts zero.
+
+Note there is **no per-node model routing** — all agents share one tier. Routing
+cheap nodes to haiku and synthesis to sonnet is an obvious future change, but it
+is not what the code does today.
 
 **Why Milvus over Chroma/Pinecone?**
 Milvus handles billion-scale vectors in distributed mode (same collection, just add nodes). It supports native hybrid search (BM25 + dense) in v2.4+, which is the next planned feature. Chroma doesn't scale; Pinecone is expensive.
@@ -460,26 +488,38 @@ docker compose exec backend python scripts/ingest.py docs/ --reset
 
 ### Check service health from the UI
 Click the **⚙️** button in the top-right of the app header to open the
-Service Status modal — shows Groq / Milvus / TMDB live status, API key
-presence, and rate limit countdown if the daily Groq quota is exhausted.
+Service Status modal — shows Anthropic / Milvus / TMDB live status, API key
+presence, and rate limit countdown if the self-imposed daily token cap is exhausted.
 
 ### Common issues
 | Symptom | Fix |
 |---|---|
 | Backend unhealthy | `docker compose logs backend` — usually a missing API key |
-| Answers not streaming | Check Groq rate limit in ⚙️ status modal |
+| Answers not streaming | Check the per-IP + global caps in ⚙️ status modal |
 | RAG returns nothing | Run `make ingest` — collection may be empty |
 | Port conflict on startup | `docker compose down` first, then check `docker ps` for orphan containers |
 | Frontend shows wrong version | `docker compose build --no-cache frontend && docker compose up -d frontend` |
 | Trending card routes to RAG | Should not happen after v2.1.1 — trending clicks include "movie" + year in query |
 | Status shows "online" but queries fail | Status ping uses only 5 tokens; if ⚙️ still shows "online" after a 429, wait 5 min for the tracker to self-clear |
 
-### Groq rate limits (free tier)
-- **100,000 tokens/day** on a rolling 24-hour window (~150–300 real queries/day)
-- Heavy development testing burns through this fast; production usage rarely hits it
-- When the quota is hit, the backend sets an in-memory flag that makes ⚙️ show **"rate limited"** + countdown even if the tiny 5-token status ping succeeds
-- The flag auto-clears after 5 minutes; if queries are still failing after that, check ⚙️ again
-- To increase the limit: upgrade at [console.groq.com/settings/billing](https://console.groq.com/settings/billing) (Dev tier)
+### Quotas and spend caps (self-imposed, in `src/usage.py`)
+There is no free-tier provider quota in play — Anthropic usage is paid, so the
+limits that matter are the ones this app enforces on itself. All of them are
+**in-process module state**, so they reset on container restart and would not be
+shared across multiple backend replicas:
+
+- `FREE_REQUESTS_PER_WINDOW` (default **10**) per IP per rolling
+  `FREE_WINDOW_SECONDS` (default **3600**). Signing in with `PREVIEW_PASSWORD`
+  lifts the per-IP limit.
+- `GLOBAL_DAILY_CALL_CAP` (default **30**) — site-wide ceiling on anonymous
+  searches per day. Signed-in/admin bypasses it.
+- `DAILY_TOKEN_HARD_CAP` (default **0** = disabled) — kill-switch that pauses
+  anonymous LLM calls once today's cumulative tokens cross it. Protects paid spend.
+- `DAILY_TOKEN_BUDGET` is display-only: the denominator for the token meter.
+
+Client identity for all of the above comes from `usage.client_ip()`, which
+prefers **`CF-Connecting-IP`** — see the client-IP note below, this is the only
+header that is trustworthy here.
 
 ---
 

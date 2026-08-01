@@ -275,8 +275,10 @@ Two very differently-shaped halves in **one** Milvus collection:
   `ebert/<slug>`. `/api/knowledge` reports these two halves separately precisely because listing
   tens of thousands of reviews individually would be useless (`main.py:486`).
 
-`README.md` still claims "17 docs / 168 chunks" — stale; there are 37 markdown files now, plus the
-Ebert corpus. Live counts come from `client.query(..., output_fields=["count(*)"])`.
+The corpus is **37 markdown files** under `backend/docs/` plus the separately-ingested Ebert
+review corpus. Chunk counts are deliberately not recorded in prose (they change on every
+re-ingest and after each nightly Ebert run) — read the live number with
+`client.query(..., output_fields=["count(*)"])`.
 
 ### Chunking
 
@@ -295,8 +297,9 @@ Reviews get a synthesised header before splitting so the first chunk carries pro
 
 OpenAI **`text-embedding-3-small`**, 1536-d (`config.py:35`, `milvus_retriever.py:22`).
 Chosen for cost (~$0.02/1M tokens) — embedding tens of thousands of reviews is the only
-non-trivial embedding bill in the system. There is no local/Ollama path in the code despite
-`.env.example` documenting `EMBEDDING_PROVIDER=ollama` (see §10).
+non-trivial embedding bill in the system. OpenAI is the **only** embedding backend implemented:
+there is no provider switch, and the collection's dense field is fixed at 1536 dimensions, so
+changing embedder means a schema change and a full re-ingest.
 
 ### Collection schema and index config
 
@@ -357,8 +360,9 @@ system doesn't have. Larger `k` flattens the curve (more recall, weaker top-rank
 rank-6 hit `1/66 ≈ 0.0152` — only a ~8% spread, so a document that appears in *both* lists almost
 always outranks one that dominates a single list. That's the intended behaviour.
 
-`top_k = 6` is **hardcoded** at `config.py:30` — it does not read the `TOP_K` env var that
-`.env.example` documents.
+`top_k` defaults to **6** (`config.py:30`, now read from the `TOP_K` env var). Note this is a
+single global k — there is no per-route or per-query-type k, so a broad "compare these five
+directors" question retrieves the same six chunks as a narrow factual lookup.
 
 The retrieved chunks are joined into one context block with `[Source: {source}]` headers and
 `\n\n---\n\n` separators (`milvus_retriever.py:112`), then dropped into the RAG agent's system prompt.
@@ -711,21 +715,34 @@ Name these before an interviewer finds them.
   Claude. The blast radius is genuinely small — the LLM has no tools, no secrets in context, and
   cannot execute anything — but the system does not sanitise or delimit untrusted content beyond
   prompt instructions.
-- **Docs/code drift** (each of these is a real trap if you quote the docs in an interview):
-  - `HANDOFF.md` and `WHITEPAPER.md` describe **Groq / `llama-3.3-70b-versatile`** throughout,
-    including a "Why Groq?" design-decision section and Groq rate-limit runbooks. The code is
-    **100% Anthropic Claude** (`src/llm.py`, `src/config.py`, `requirements.txt` pins
-    `langchain-anthropic`; there is no Groq import anywhere). The migration happened; those two docs
-    were never updated.
-  - `.env.example` documents `TOP_K` and `EMBEDDING_PROVIDER=ollama`; **`config.py` reads neither** —
-    `top_k` is hardcoded to 6 and the only embedder in the code is OpenAI.
-  - `MILVUS_COLLECTION` default is `cineai_docs` in `config.py:27` but `smartmoviesearch_docs` in
-    `.env.example`.
-  - `README.md` says "17 docs / 168 chunks"; there are 37 markdown files plus the Ebert corpus.
-  - The checked-in `nginx.conf` describes port-80 / Cloudflare-Flexible; the live origin is
-    443 + mTLS per `SECURITY-AUDIT.md`.
-  - `HANDOFF.md`'s state diagram omits `music_result`; `frontend/src/types.ts` omits `music_agent`
-    from `AgentName` and `music` from `RoutingDecision`.
+- **Docs/code drift — found by this audit, now RESOLVED.** These were real and are recorded
+  because the *pattern* is worth talking about in an interview, not because they still bite:
+  - `HANDOFF.md` and `WHITEPAPER.md` described **Groq / `llama-3.3-70b-versatile`** throughout,
+    including a "Why Groq?" design-decision section and Groq rate-limit runbooks, while the code
+    was **100% Anthropic Claude** (`src/llm.py`, `src/config.py`, `requirements.txt` pins
+    `langchain-anthropic`; no Groq import anywhere). The migration happened; the docs were never
+    updated. **Fixed** — both documents now describe the Claude tier system, and the Groq
+    free-tier runbook was replaced with the app's own quota model from `src/usage.py`.
+  - `.env.example` documented `TOP_K` and `EMBEDDING_PROVIDER` that `config.py` never read.
+    **Fixed** — `config.py` now reads `TOP_K` (default 6, so behaviour is unchanged), and the
+    unimplemented Ollama-embedding option was removed from the docs rather than left as a
+    promise the code does not keep.
+  - `MILVUS_COLLECTION` default disagreed between `config.py` (`cineai_docs`) and `.env.example`
+    (`smartmoviesearch_docs`). **Fixed** — `.env.example` now matches the code default.
+  - The corpus count "17 docs / 168 chunks" was stale (37 markdown files plus the Ebert corpus).
+    **Fixed** — replaced with the file count and an explicit note that chunk count is not tracked
+    in docs because every re-ingest changes it.
+  - The checked-in `nginx.conf` described port-80 / Cloudflare-Flexible — the exact posture that
+    was finding SEC-1 — while the live origin is 443 + mTLS. **Fixed** — the file is now clearly
+    marked historical/do-not-deploy, since deploying it would silently re-open SEC-1.
+  - `frontend/src/types.ts` omitted `music_agent` from `AgentName` and the music routes from
+    `RoutingDecision`, and `HANDOFF.md`'s state block omitted `music_result`. **Fixed** in both.
+
+  The honest interview framing: this is what happens when documentation is written once at
+  feature-completion time and never re-derived from the code. The durable fix is not "update the
+  docs" — it is a check that fails when they diverge (assert the documented model IDs exist in
+  `MODELS`, assert every env var in `.env.example` is read by `config.py`, assert `AgentName`
+  matches the `_dispatch` mapping). That check does not exist yet.
 
 ---
 
@@ -902,11 +919,21 @@ model. It's a smell only if it's hidden; here the exact list is served to the fr
 `/api/rules` from the same constants the prompt is built from, so documented behaviour can't drift
 from actual behaviour.
 
-**25. Your docs say Groq. Your code says Claude. Explain.**
-The system was migrated from Groq/Llama to Anthropic Claude and `HANDOFF.md` and `WHITEPAPER.md`
-weren't updated — the code is the truth: `src/llm.py` is `langchain_anthropic.ChatAnthropic`,
-`requirements.txt` has no Groq dependency. It's a good illustration of why I treat docs as a starting
-point and verify against the implementation, and it's on my list to fix.
+**25. I found docs in this repo describing a Groq/Llama stack. What happened?**
+The system was migrated from Groq/Llama to Anthropic Claude and the design docs weren't updated
+with it — for a while `HANDOFF.md` and `WHITEPAPER.md` carried a "Why Groq?" rationale for a
+provider the code no longer used. I caught it doing a code-first audit of my own documentation and
+corrected both documents against `src/llm.py`, along with five smaller drifts in the same pass
+(unread env vars, a mismatched collection default, a stale corpus count, a stale `nginx.conf`, and
+a frontend type union missing the music agent).
+
+The useful part of the answer isn't the fix, it's the diagnosis: docs written once at
+feature-completion time and never re-derived from code will always drift, and the failure is
+silent — nothing breaks, the documentation just quietly starts lying. The durable fix is an
+executable check (assert documented model IDs exist in `MODELS`; assert every var in
+`.env.example` is actually read by `config.py`; assert the frontend `AgentName` union matches the
+backend `_dispatch` mapping). I haven't built that yet, which is why I'd expect the same class of
+drift to reappear.
 
 ---
 

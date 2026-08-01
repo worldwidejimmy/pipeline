@@ -5,15 +5,18 @@ export type AgentName =
   | 'tmdb_agent'
   | 'rag_agent'
   | 'search_agent'
+  | 'music_agent'
   | 'synthesise'
   // compare-mode pseudo-agents (RAG vs no-RAG demo)
   | 'rag_answer'
   | 'base_answer'
   | 'judge';
 
+// Must stay in sync with the _dispatch mapping in backend/src/graph/pipeline.py.
 export type RoutingDecision =
-  | 'tmdb' | 'rag' | 'search'
-  | 'tmdb+rag' | 'tmdb+search' | 'rag+search' | 'all';
+  | 'tmdb' | 'rag' | 'search' | 'music'
+  | 'tmdb+rag' | 'tmdb+search' | 'tmdb+music'
+  | 'music+search' | 'rag+search' | 'all';
 
 export interface PipelineStartEvent {
   type: 'pipeline_start';
@@ -178,6 +181,7 @@ export const AGENT_META: Record<AgentName, { label: string; color: string; icon:
   tmdb_agent:       { label: 'TMDB Agent',   color: '#06b6d4', icon: '🎬' },
   rag_agent:        { label: 'RAG Agent',    color: '#3b82f6', icon: '🔍' },
   search_agent:     { label: 'Web Search',   color: '#f97316', icon: '🌐' },
+  music_agent:      { label: 'Music Agent',  color: '#ec4899', icon: '🎵' },
   synthesise:       { label: 'Synthesiser',  color: '#eab308', icon: '✨' },
   rag_answer:       { label: 'With RAG',     color: '#3b82f6', icon: '🔍' },
   base_answer:      { label: 'Without RAG',  color: '#a855f7', icon: '🧠' },

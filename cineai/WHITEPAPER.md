@@ -9,7 +9,7 @@
 
 SmartMovieSearch answers natural-language questions about movies and TV shows that no static database or simple search engine can handle. A question like *"Show me good bank heist movies"* requires understanding that heist is a theme, not a genre tag — then pulling live data, curated knowledge, and current web results simultaneously, and synthesising them into a single coherent answer. The system does this in under five seconds, streaming the response token by token as it is generated.
 
-The project is a full-stack production application built with a modern AI stack: a **multi-agent LangGraph pipeline** on the backend, **Milvus hybrid vector search** for the knowledge base, **Groq** for fast LLM inference, and a **React** frontend that visualises the AI pipeline in real time.
+The project is a full-stack production application built with a modern AI stack: a **multi-agent LangGraph pipeline** on the backend, **Milvus hybrid vector search** for the knowledge base, **Anthropic Claude** for LLM inference, and a **React** frontend that visualises the AI pipeline in real time.
 
 ---
 
@@ -75,9 +75,20 @@ Milvus is a distributed vector database that stores the movie knowledge corpus (
 
 **Why not just embeddings?** A query for "Christopher Nolan" should find documents that contain those exact words, not just semantically similar ones. BM25 handles this; embeddings alone can miss it.
 
-### Groq — Fast LLM Inference
+### Anthropic Claude — LLM Inference
 
-Groq runs `llama-3.3-70b-versatile` on custom LPU (Language Processing Unit) hardware. It delivers roughly 10× the token throughput of comparable cloud GPU providers, which matters enormously in a streaming UI where users watch tokens appear in real time. The supervisor, all agents, and the synthesiser all use Groq.
+Every LLM call — supervisor routing, per-agent intent extraction, and final
+synthesis — goes through a single factory, `backend/src/llm.py:get_chat()`, which
+returns a `ChatAnthropic`. The model tier is one server-wide setting
+(`DEFAULT_MODEL_TIER` = `haiku` | `sonnet` | `opus`), so the whole pipeline can be
+moved between price/quality points with an env change rather than per-agent edits.
+Haiku is the default: routing and intent extraction are short structured-output
+calls where the cheap tier is sufficient.
+
+The cost of that simplicity is that there is **no per-node model routing** — the
+synthesiser runs on the same tier as the router, even though synthesis is the call
+that most benefits from a stronger model. Splitting the tier per node is the
+obvious next optimisation.
 
 **Why streaming?** Waiting 8–10 seconds for a complete response before showing anything creates a perception of a broken application. Streaming the answer as it is generated — via Server-Sent Events — makes the system feel instant.
 
@@ -101,11 +112,11 @@ The full stack (Milvus + etcd + MinIO + backend + frontend) runs as Docker Compo
 
 *"Show me good bank heist movies"*
 
-1. **Supervisor** receives the question, calls Groq to classify intent → routes to all three agents in parallel: `tmdb + rag + search`
-2. **TMDB agent** calls Groq to extract intent (`discover`, genre: Crime/Thriller) → hits TMDB API → calls Groq to write a grounded answer citing specific films and ratings
-3. **RAG agent** embeds the query with OpenAI → runs hybrid BM25+dense search in Milvus → retrieves chunks from the heist film corpus → calls Groq to synthesise a knowledge-based answer
-4. **Search agent** sends the query to Tavily → retrieves current web results → calls Groq to ground the answer
-5. **Synthesiser** receives all three agent outputs, calls Groq to merge them into a single coherent answer, deduplicating overlapping film recommendations and citing sources
+1. **Supervisor** receives the question, calls Claude to classify intent → routes to all three agents in parallel: `tmdb + rag + search`
+2. **TMDB agent** calls Claude to extract intent (`discover`, genre: Crime/Thriller) → hits TMDB API → calls Claude to write a grounded answer citing specific films and ratings
+3. **RAG agent** embeds the query with OpenAI → runs hybrid BM25+dense search in Milvus → retrieves chunks from the heist film corpus → calls Claude to synthesise a knowledge-based answer
+4. **Search agent** sends the query to Tavily → retrieves current web results → calls Claude to ground the answer
+5. **Synthesiser** receives all three agent outputs, calls Claude to merge them into a single coherent answer, deduplicating overlapping film recommendations and citing sources
 6. **SSE stream** delivers `pipeline_start`, `routing_decision`, `agent_start/end`, `token` (×N), `tmdb_results`, `chunks_retrieved`, and `done` events — the frontend renders each one as it arrives
 
 Total latency: typically 3–6 seconds. The user sees tokens appearing within ~1 second of submitting the query.
@@ -131,7 +142,7 @@ Total latency: typically 3–6 seconds. The user sees tokens appearing within ~1
 | Layer | Technology | Role |
 |---|---|---|
 | Orchestration | LangGraph 1.1 | Multi-agent state machine with conditional routing and memory |
-| LLM inference | Groq (llama-3.3-70b) | All reasoning: routing, intent extraction, answer generation |
+| LLM inference | Anthropic Claude (haiku / sonnet / opus tier) | All reasoning: routing, intent extraction, answer generation |
 | Vector DB | Milvus 2.5 | Hybrid BM25 + dense search over movie knowledge corpus |
 | Embeddings | OpenAI text-embedding-3-small | 1536-dim dense vectors for semantic retrieval |
 | Movie data | TMDB API | Real-time film/TV metadata, cast, ratings, trending |

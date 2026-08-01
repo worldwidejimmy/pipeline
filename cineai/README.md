@@ -2,7 +2,7 @@
 
 > **What a live LLM brings to movie discovery that no static database can.**
 
-A multi-agent RAG pipeline built with LangGraph, Groq, TMDB, Milvus, MusicBrainz, and optional Tavily.
+A multi-agent RAG pipeline built with LangGraph, Anthropic Claude, TMDB, Milvus, MusicBrainz, and optional Tavily.
 React + Vite frontend with a full LangSmith-style observability dashboard.
 
 **Operations handoff:** [../HANDOFF.md](../HANDOFF.md) (Ebert scrape, `/api/rules`, generated `data/`, deployment notes).
@@ -97,7 +97,7 @@ filter UI can produce.
              │              │              │
     ┌────────▼──────────────▼──────────────▼──────┐
     │              Synthesiser Node                │
-    │     Groq LLM (GROQ_MODEL in .env, streaming) │
+    │  Claude (DEFAULT_MODEL_TIER in .env, streaming) │
     └─────────────────────────────────────────────┘
 ```
 
@@ -142,7 +142,7 @@ The backend transforms LangGraph's `astream_events()` into typed frontend events
 | Layer | Technology |
 |---|---|
 | Agent Orchestration | LangGraph StateGraph (async, streaming) |
-| LLM | Groq — model from `GROQ_MODEL` in `.env` (e.g. `llama-3.1-8b-instant` for free tier) |
+| LLM | Anthropic Claude — tier from `DEFAULT_MODEL_TIER` in `.env` (`haiku` default, `sonnet`/`opus` available) |
 | Movie / TV Data | TMDB API (free tier) — real-time search, details, trending |
 | Music Data | MusicBrainz (no key) |
 | RAG / Vector DB | Milvus (shared with pipeline project on :19530) |
@@ -159,8 +159,8 @@ The backend transforms LangGraph's `astream_events()` into typed frontend events
 ### Prerequisites
 
 - Pipeline project's Milvus stack running: `cd /home/user/pipeline && docker-compose up -d`
-- API keys (all free tiers work):
-  - [Groq](https://console.groq.com) — LLM inference
+- API keys (TMDB/Tavily have free tiers; Anthropic is paid):
+  - [Anthropic](https://console.anthropic.com) — LLM inference (paid; haiku is the cheap default)
   - [TMDB](https://www.themoviedb.org/settings/api) — movie data (use "API Read Access Token")
   - [OpenAI](https://platform.openai.com) — embeddings only (tiny cost)
   - [Tavily](https://tavily.com) — optional web search
@@ -172,7 +172,7 @@ cd /home/user/cineai
 
 # Configure API keys
 cp backend/.env.example backend/.env
-nano backend/.env   # fill in GROQ_API_KEY, TMDB_BEARER_TOKEN, OPENAI_API_KEY
+nano backend/.env   # fill in ANTHROPIC_API_KEY, TMDB_BEARER_TOKEN, OPENAI_API_KEY
 
 # Install and start everything
 ./start.sh

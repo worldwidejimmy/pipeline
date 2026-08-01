@@ -27,7 +27,7 @@ class Config:
     milvus_collection: str = os.getenv("MILVUS_COLLECTION", "cineai_docs")
 
     # Retrieval
-    top_k: int = 6
+    top_k: int = int(os.getenv("TOP_K", "6"))
     chunk_size: int = 800
     chunk_overlap: int = 100
 
