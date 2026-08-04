@@ -60,6 +60,12 @@ setup: setup-venv setup-frontend ## Install all dependencies (dev mode)
 
 # ── Testing ───────────────────────────────────────────────────────────────────
 
+privacy-audit: ## Scan the whole tree (and `make privacy-audit-history` for git history) for anything private — run before pushing
+	cd .. && scripts/privacy-audit.sh
+
+privacy-audit-history: ## Privacy audit incl. full git history (slower; reports already-published leaks)
+	cd .. && scripts/privacy-audit.sh --history
+
 test-unit: ## Backend unit tests (usage.py etc.) — free, no Docker/API keys needed
 	@test -x $(BACKEND_DIR)/.tests-venv/bin/python || \
 		(python3 -m venv $(BACKEND_DIR)/.tests-venv && \

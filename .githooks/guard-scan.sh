@@ -44,9 +44,11 @@ done < <(git diff --name-only --diff-filter=ACMR "$@")
 # ── 2. Secret-format patterns in ADDED lines ──────────────────────────────────
 # .githooks/ is excluded from the FORMAT checks only (its detection patterns would
 # match themselves); private patterns and filename rules still cover it.
+# Strip the leading '+' from added lines after filtering — otherwise the diff
+# marker is read as content (e.g. '+@app.get(...)' looks like an email local-part).
 added=$(git diff -U0 --diff-filter=ACMR "$@" -- ':(top,exclude).githooks' ':(top)' \
-        | grep -E '^\+' | grep -vE '^\+\+\+' || true)
-added_all=$(git diff -U0 --diff-filter=ACMR "$@" | grep -E '^\+' | grep -vE '^\+\+\+' || true)
+        | grep -E '^\+' | grep -vE '^\+\+\+' | sed 's/^+//' || true)
+added_all=$(git diff -U0 --diff-filter=ACMR "$@" | grep -E '^\+' | grep -vE '^\+\+\+' | sed 's/^+//' || true)
 
 check() {  # check <description> <extended-regex>
   local hits
@@ -69,9 +71,12 @@ check "JWT (e.g. TMDB bearer)"      'eyJ[A-Za-z0-9_-]{20,}\.eyJ[A-Za-z0-9_-]{10,
 check "LangSmith key"               '(ls__|lsv2_[a-z]+_)[A-Za-z0-9]{20,}'
 # Credential-ish assignments with a real-looking literal value (placeholders in
 # .env.example and code reading the env are exempt).
+# A real leaked credential is a quoted string or a bare token; `KEY = mod.ATTR`,
+# `KEY = get_config()`, env reads, and placeholders are code, not secrets.
 cred_hits=$(printf '%s\n' "$added" \
   | grep -nE -- '(SMTP_PASS|SMTP_USER|PREVIEW_PASSWORD|ADMIN_EMAIL|API_KEY|BEARER_TOKEN)[[:space:]]*=[[:space:]]*[^[:space:]]{4,}' \
-  | grep -ivE 'your_|_here|example|changeme|placeholder|environ|getenv|process\.env|\$\{|<' | head -3 || true)
+  | grep -ivE 'your_|_here|example|changeme|placeholder|environ|getenv|process\.env|\$\{|<' \
+  | grep -ivE '=[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[.(]' | head -3 || true)
 if [ -n "$cred_hits" ]; then
   say "credential assignment with a real-looking value:"
   printf '%s\n' "$cred_hits" | sed 's/^/    /' >&2
@@ -80,7 +85,7 @@ fi
 # ── 2b. Personal information (PII) in ADDED lines ─────────────────────────────
 # Email addresses — anything outside the allowlist of intentionally-public /
 # placeholder addresses is treated as personal info.
-email_allow='users\.noreply\.github\.com|@example\.com|@yourdomain\.com|@smartmoviesearch\.com|@anthropic\.com|noreply@'
+email_allow='users\.noreply\.github\.com|@example\.com|@yourdomain\.com|@smartmoviesearch\.com|@cineai\.app|@anthropic\.com|noreply@'
 email_hits=$(printf '%s\n' "$added" \
   | grep -nE -- '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' \
   | grep -ivE "$email_allow" | head -3 || true)

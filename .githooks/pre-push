@@ -7,6 +7,11 @@ zero=0000000000000000000000000000000000000000
 empty_tree=4b825dc642cb6eb9a060e54bf8d69288fbee4904
 here="$(cd "$(dirname "$0")" && pwd)"
 fail=0
+
+# Full-tree gate: scan ALL of HEAD's content (not just the outgoing diff), so a
+# leak sitting in an earlier already-committed file is caught before it reaches
+# the public remote. Same detectors as the per-commit scan.
+"$here/guard-scan.sh" pre-push-fulltree -- "$empty_tree" HEAD || fail=1
 while read -r _lref lsha _rref rsha; do
   [ "$lsha" = "$zero" ] && continue                # ref deletion — nothing outgoing
   if [ "$rsha" = "$zero" ]; then base="$empty_tree"; range="$lsha"; else base="$rsha"; range="$rsha..$lsha"; fi
