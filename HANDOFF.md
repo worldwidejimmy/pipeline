@@ -89,7 +89,7 @@ Reports also persist for triage under `backend/data/ops-logs/` (`devops-*.log`,
 
 - **Ingest** is idempotent + flock-guarded; logs to `data/nightly-logs/`. `--limit 800` bounds it to a ~25-min run that chips at the backlog; failed Wayback URLs are recorded in `data/ebert_failed_urls.json` and skipped on future runs. Emails a summary **only when it adds** review chunks.
 - **DevOps check** runs on the host (no sudo), reads live state, and emails 🟢/🔴.
-- **Email** is via `send_email.py` using `SMTP_*` + `ADMIN_EMAIL` in `backend/.env` (currently reuses an existing transactional-relay account; From/To are whatever `SMTP_FROM` / `ADMIN_EMAIL` are set to — see `.env`, not checked in). Host scripts read `.env` live — no restart needed to change SMTP settings.
+- **Email** is via `send_email.py` using `SMTP_*` + `ADMIN_EMAIL` in `backend/.env` (a transactional-relay account; From/To are whatever `SMTP_FROM` / `ADMIN_EMAIL` are set to — see `.env`, not checked in). Host scripts read `.env` live — no restart needed to change SMTP settings.
 - **Docker log rotation** is set in `docker-compose.yml` (`x-logging`: 10m × 3) — applies on each container's next recreate.
 
 ---

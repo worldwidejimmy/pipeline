@@ -22,7 +22,7 @@ its API, the deployment on the OVH host, and the public `worldwidejimmy/pipeline
 | SEC-4 | 🟡 Low | **Unauthenticated `GET`/`DELETE /api/history`** — anyone could read/clear a thread's conversation. | **Fixed** — gated to the admin token. |
 | SEC-5 | 🟡 Low | **Info disclosure** — `/api/status` exposes key-presence booleans, model, Milvus chunk counts. Access token rides in the SSE URL (`?_t=`) so it lands in nginx logs. | Accepted (low). Protect logs. Consider scoping the SSE token separately later. |
 | SEC-6 | 🟡 Low | **Prompt injection** — user query + RAG/Tavily/TMDB text flow into Claude. Blast radius is output manipulation + token waste only; no tool execution, no secrets in context. Cannot escalate to RCE or data theft. | Accepted (content risk). Turnstile + spend cap reduce abuse. |
-| REPO-1 | 🟡 Low | Early commits used the box-default author email, which leaked the hosting provider and host label in public commit metadata. | **Mitigated going forward** — repo git identity set to `…@users.noreply.github.com`, and `.githooks/pre-push` now rejects box-default identities on outgoing commits. The original metadata remains in published history; a rewrite is optional and has not been done. |
+| REPO-1 | 🟡 Low | A box-default commit author email could leak the host in public commit metadata. | **Mitigated** — repo git identity pinned to `…@users.noreply.github.com`; pre-commit + pre-push hooks reject any box-default identity. Verified 2026-08-04: no commit in published history uses one. |
 | REPO-2 | ⚪ Info | `Claude-Session:` URLs in commit bodies (auth-gated, not public-readable). | Accepted. |
 
 ## What an attacker CANNOT do
