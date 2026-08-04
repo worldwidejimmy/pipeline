@@ -24,6 +24,7 @@ interface KnowledgeData {
 function formatDoc(source: string): { icon: string; title: string; category: string } {
   const name = source.split('/').pop()?.replace('.md', '') ?? source
   const parts = source.split('/')
+  const isMusic = parts.includes('music')
 
   const categoryMap: Record<string, { icon: string; label: string }> = {
     directors: { icon: '🎬', label: 'Director' },
@@ -32,10 +33,19 @@ function formatDoc(source: string): { icon: string; title: string; category: str
     heist:     { icon: '🔫', label: 'Genre' },
     decades:   { icon: '📅', label: 'Decade' },
     themes:    { icon: '💡', label: 'Theme' },
+    international: { icon: '🌍', label: 'International' },
+    tv:        { icon: '📺', label: 'TV' },
+  }
+  // Music paths (docs/music/{artists,albums,genres}/…) get their own categories.
+  const musicMap: Record<string, { icon: string; label: string }> = {
+    artists: { icon: '🎵', label: 'Music Artist' },
+    albums:  { icon: '💿', label: 'Album' },
+    genres:  { icon: '🎸', label: 'Music Genre' },
   }
 
   const folder = parts.length >= 2 ? parts[parts.length - 2] : ''
-  const cat = categoryMap[folder] ?? { icon: '📄', label: 'Guide' }
+  const cat = (isMusic ? musicMap[folder] : categoryMap[folder])
+    ?? categoryMap[folder] ?? { icon: '📄', label: 'Guide' }
 
   const titleMap: Record<string, string> = {
     'stanley-kubrick':     'Stanley Kubrick',
@@ -69,9 +79,17 @@ interface Props {
   onSearch: (q: string) => void
 }
 
+interface ChunkView {
+  source: string
+  title: string
+  chunks: { id: number; text: string }[]
+  loading: boolean
+}
+
 export function KnowledgeModal({ onClose, onSearch }: Props) {
   const [data, setData] = useState<KnowledgeData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [view, setView] = useState<ChunkView | null>(null)   // drill-in: null = list
 
   useEffect(() => {
     apiFetch('/api/knowledge')
@@ -79,6 +97,15 @@ export function KnowledgeModal({ onClose, onSearch }: Props) {
       .then(d => { setData(d); setLoading(false) })
       .catch(() => setLoading(false))
   }, [])
+
+  // Open the RAG explorer drill-in for one document: fetch its stored chunks.
+  const openChunks = (source: string, title: string) => {
+    setView({ source, title, chunks: [], loading: true })
+    apiFetch(`/api/knowledge/chunks?source=${encodeURIComponent(source)}`)
+      .then(r => r.json())
+      .then(d => setView({ source, title, chunks: d.chunks ?? [], loading: false }))
+      .catch(() => setView({ source, title, chunks: [], loading: false }))
+  }
 
   const handleBackdrop = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) onClose()
@@ -94,7 +121,7 @@ export function KnowledgeModal({ onClose, onSearch }: Props) {
               <div className="modal-title-text">Knowledge Base</div>
               <div className="modal-title-sub">
                 {loading ? 'Loading…' : data
-                  ? `${data.total_chunks} chunks across ${data.total_docs} documents — click any topic to search`
+                  ? `${data.total_chunks.toLocaleString()} chunks across ${data.total_docs} documents — click any doc to explore its stored chunks`
                   : 'Could not load'}
               </div>
             </div>
@@ -103,11 +130,49 @@ export function KnowledgeModal({ onClose, onSearch }: Props) {
         </div>
 
         <div className="modal-body">
-          {loading && (
+          {/* ── RAG explorer drill-in: one document's stored chunks ───────── */}
+          {view && (
+            <div className="kb-explorer">
+              <div className="kb-explorer-bar">
+                <button className="kb-back" onClick={() => setView(null)}>← All documents</button>
+                <button
+                  className="kb-search-this"
+                  onClick={() => { onSearch(`Tell me about ${view.title}`); onClose() }}
+                >🔍 Search this topic</button>
+              </div>
+              <div className="kb-explorer-head">
+                <div className="kb-explorer-title">{view.title}</div>
+                {/* the back-pointer: exactly what Milvus stores as `source` */}
+                <div className="kb-backpointer" title="source field stored on every chunk">
+                  ↩ <code>{view.source}</code>
+                </div>
+                <div className="kb-explorer-sub">
+                  {view.loading ? 'Loading chunks…'
+                    : `${view.chunks.length} chunk${view.chunks.length !== 1 ? 's' : ''} stored in Milvus — this is exactly what the retriever sees`}
+                </div>
+              </div>
+              <div className="kb-chunks">
+                {view.chunks.map((c, i) => (
+                  <div key={c.id} className="kb-chunk">
+                    <div className="kb-chunk-meta">
+                      <span className="kb-chunk-idx">chunk {i + 1}</span>
+                      <span className="kb-chunk-id">id {c.id} · {c.text.length} chars</span>
+                    </div>
+                    <div className="kb-chunk-text">{c.text}</div>
+                  </div>
+                ))}
+                {!view.loading && view.chunks.length === 0 && (
+                  <div className="modal-empty" style={{ padding: 20 }}>No chunks found for this source.</div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {!view && loading && (
             <div className="modal-loading">Loading knowledge base…</div>
           )}
 
-          {!loading && data && data.docs.length === 0 && !data.reviews && (
+          {!view && !loading && data && data.docs.length === 0 && !data.reviews && (
             <div className="modal-empty">
               <div style={{ fontSize: 32, marginBottom: 10 }}>📭</div>
               <div>No documents ingested yet.</div>
@@ -117,7 +182,7 @@ export function KnowledgeModal({ onClose, onSearch }: Props) {
             </div>
           )}
 
-          {!loading && data && data.reviews && data.reviews.chunks > 0 && (
+          {!view && !loading && data && data.reviews && data.reviews.chunks > 0 && (
             <div className="modal-group">
               <div className="modal-group-label">⭐ Critic Reviews</div>
               <div className="modal-doc-grid">
@@ -134,7 +199,7 @@ export function KnowledgeModal({ onClose, onSearch }: Props) {
             </div>
           )}
 
-          {!loading && data && data.docs.length > 0 && (
+          {!view && !loading && data && data.docs.length > 0 && (
             <>
               {/* Group by category */}
               {(() => {
@@ -152,13 +217,11 @@ export function KnowledgeModal({ onClose, onSearch }: Props) {
                         <button
                           key={doc.source}
                           className="modal-doc-card"
-                          onClick={() => {
-                            onSearch(`Tell me about ${meta.title}`)
-                            onClose()
-                          }}
+                          onClick={() => openChunks(doc.source, meta.title)}
+                          title={`Explore chunks · ${doc.source}`}
                         >
                           <div className="modal-doc-title">{meta.title}</div>
-                          <div className="modal-doc-chunks">{doc.chunks} chunks</div>
+                          <div className="modal-doc-chunks">{doc.chunks} chunks →</div>
                         </button>
                       ))}
                     </div>

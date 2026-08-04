@@ -384,6 +384,64 @@ html, body, #root {
   color: var(--text);
   margin-bottom: 4px;
 }
+
+/* ── RAG explorer drill-in ─────────────────────────────────────────────── */
+.kb-explorer { display: flex; flex-direction: column; gap: 12px; }
+.kb-explorer-bar { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.kb-back, .kb-search-this {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.kb-back:hover { border-color: var(--text-muted); }
+.kb-search-this:hover { border-color: var(--amber); background: var(--amber-glow); }
+.kb-explorer-head {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px;
+}
+.kb-explorer-title { font-size: 16px; font-weight: 700; color: var(--text); }
+.kb-backpointer {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+.kb-backpointer code {
+  font-family: var(--font-mono);
+  color: var(--blue);
+  background: var(--surface2);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.kb-explorer-sub { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+.kb-chunks { display: flex; flex-direction: column; gap: 10px; }
+.kb-chunk {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--blue);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+.kb-chunk-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+}
+.kb-chunk-idx { color: var(--blue); font-weight: 600; }
+.kb-chunk-text {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+}
 .modal-doc-chunks {
   font-size: 11px;
   color: var(--text-muted);

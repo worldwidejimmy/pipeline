@@ -21,6 +21,9 @@ def _fmt_release_group(rg: dict) -> dict:
         "id":         rg.get("id"),
         "title":      rg.get("title"),
         "type":       rg.get("primary-type"),        # Album, Single, EP, etc.
+        # secondary types mark non-studio albums: Compilation, Live, Soundtrack,
+        # Remix, DJ-mix, Demo, Mixtape. Empty list => a studio album.
+        "secondary_types": rg.get("secondary-types", []) or [],
         "year":       (rg.get("first-release-date") or "")[:4],
         "rating":     rg.get("rating", {}).get("value"),
     }

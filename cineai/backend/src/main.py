@@ -549,6 +549,37 @@ async def knowledge_base():
         return {"total_chunks": 0, "total_docs": 0, "docs": [], "reviews": None, "error": str(exc)}
 
 
+@app.get("/api/knowledge/chunks")
+async def knowledge_chunks(source: str, request: Request):
+    """Return the actual stored chunks for one source (the RAG explorer drill-in).
+
+    `source` is the back-pointer shown in the knowledge list, e.g.
+    'docs/music/artists/the-police.md' or 'ebert/mammoth-2009'. Returns each
+    chunk's id + text exactly as stored in Milvus, so you can see what the
+    retriever actually has and how the document was split."""
+    try:
+        from pymilvus import MilvusClient
+        from src.config import get_config
+        cfg = get_config()
+        # Only allow the two real source namespaces; escape quotes to keep the
+        # Milvus filter expression safe from injection.
+        if not (source.startswith("docs/") or source.startswith("ebert/")):
+            return {"source": source, "chunks": [], "error": "unknown source namespace"}
+        safe = source.replace('"', '\\"')
+        client = MilvusClient(uri=cfg.milvus_uri)
+        rows = client.query(
+            cfg.milvus_collection,
+            filter=f'source == "{safe}"',
+            output_fields=["id", "text", "source"],
+            limit=200,
+        )
+        rows.sort(key=lambda r: r.get("id", 0))
+        chunks = [{"id": r.get("id"), "text": r.get("text", "")} for r in rows]
+        return {"source": source, "count": len(chunks), "chunks": chunks}
+    except Exception as exc:
+        return {"source": source, "chunks": [], "error": str(exc)}
+
+
 @app.get("/api/rules")
 async def get_routing_rules():
     """Return the routing rules and keyword overrides used by the supervisor agent."""
