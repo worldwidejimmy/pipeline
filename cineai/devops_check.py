@@ -81,7 +81,8 @@ for l in sh(["docker", "system", "df", "--format", "{{.Type}}: {{.Size}} ({{.Rec
     line(f"  {l}")
 
 # ── Backup freshness ──────────────────────────────────────────────────────────
-bks = sorted(glob.glob(os.path.expanduser("~/backups/smartmoviesearch/sms-*.tgz")), key=os.path.getmtime)
+# Backups are age-encrypted (sms-<stamp>.tgz.age); match .tgz.age (and legacy .tgz).
+bks = sorted(glob.glob(os.path.expanduser("~/backups/smartmoviesearch/sms-*.tgz*")), key=os.path.getmtime)
 if bks:
     age_h = (time.time() - os.path.getmtime(bks[-1])) / 3600
     line(f"\nLatest backup: {Path(bks[-1]).name} ({age_h:.0f}h ago, {len(bks)} kept)")

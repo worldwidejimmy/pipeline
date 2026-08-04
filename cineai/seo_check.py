@@ -54,7 +54,10 @@ if html:
 
     def find(pat):
         m = re.search(pat, html, re.I)
-        return m.group(1).strip() if m else None
+        if not m:
+            return None
+        # Presence-only patterns (og:image, twitter:card, …) have no capture group.
+        return (m.group(1) if m.groups() else m.group(0)).strip()
 
     title = find(r"<title>([^<]*)</title>")
     desc = find(r'<meta\s+name="description"\s+content="([^"]*)"')

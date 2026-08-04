@@ -10,20 +10,24 @@ interface Props {
 }
 
 const ALL_NODES: AgentName[] = [
-  'supervisor_route', 'tmdb_agent', 'rag_agent', 'search_agent', 'synthesise',
+  'supervisor_route', 'tmdb_agent', 'rag_agent', 'search_agent', 'music_agent', 'synthesise',
   'rag_answer', 'base_answer', 'judge'
 ]
 
 const COMPARE_NODES: AgentName[] = ['rag_answer', 'base_answer', 'judge']
 
+// Mirrors backend/src/graph/pipeline.py:_dispatch — keep in sync.
 const ROUTING_AGENTS: Record<RoutingDecision, AgentName[]> = {
-  'tmdb':        ['tmdb_agent'],
-  'rag':         ['rag_agent'],
-  'search':      ['search_agent'],
-  'tmdb+rag':    ['tmdb_agent', 'rag_agent'],
-  'tmdb+search': ['tmdb_agent', 'search_agent'],
-  'rag+search':  ['rag_agent', 'search_agent'],
-  'all':         ['tmdb_agent', 'rag_agent', 'search_agent'],
+  'tmdb':         ['tmdb_agent'],
+  'rag':          ['rag_agent'],
+  'search':       ['search_agent'],
+  'music':        ['music_agent'],
+  'tmdb+rag':     ['tmdb_agent', 'rag_agent'],
+  'tmdb+search':  ['tmdb_agent', 'search_agent'],
+  'tmdb+music':   ['tmdb_agent', 'music_agent'],
+  'music+search': ['music_agent', 'search_agent'],
+  'rag+search':   ['rag_agent', 'search_agent'],
+  'all':          ['tmdb_agent', 'rag_agent', 'search_agent', 'music_agent'],
 }
 
 export function PipelineGraph({ events }: Props) {
@@ -122,6 +126,7 @@ export function PipelineGraph({ events }: Props) {
           {renderNode('tmdb_agent')}
           {renderNode('rag_agent')}
           {renderNode('search_agent')}
+          {renderNode('music_agent')}
         </div>
 
         <div className="graph-connector">↓</div>
