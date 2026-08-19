@@ -1,79 +1,55 @@
 #!/usr/bin/env python3
 """
-Send an admin notification email using SMTP creds from cineai/backend/.env.
+Send an admin notification. Thin shim over the shared box-wide notifier.
 
-Usage:
+Kept as a stable entry point so the existing callers (nightly_update.sh,
+devops_check.py, seo_check.py) don't need to change, but it no longer holds or
+reads SMTP credentials of its own. Everything is delegated to:
+
+    server-management/scripts/notify-admin.sh
+
+which reads creds from ~/.config/admin-notify.env (chmod 600, outside every repo)
+and adds a fixed recipient, rate limiting, dedupe and a triage log.
+
+Why: this app previously read SMTP_* from cineai/backend/.env, which docker
+compose feeds to the backend container via env_file — so a container that never
+sends mail was carrying working, spam-capable credentials. Those keys are gone
+from backend/.env now; nothing in this repo has them.
+
+Usage (unchanged):
     send_email.py "Subject line"            # body on stdin
     send_email.py "Subject line" "body"
 
-Reads SMTP_HOST/PORT/USER/PASS/FROM and ADMIN_EMAIL (falls back to SMTP_TO) from
-cineai/backend/.env (or the process environment). If SMTP isn't configured it
-prints a notice and exits 0 — so cron jobs never fail just because email is off.
+Exits 0 when the notifier is missing or unconfigured, so cron never fails just
+because notification is off.
 """
 import os
-import ssl
+import subprocess
 import sys
-import smtplib
-from email.mime.text import MIMEText
-from email.utils import formatdate
 from pathlib import Path
 
-
-def _load_env(p: Path) -> dict:
-    env = {}
-    if p.exists():
-        for line in p.read_text().splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, v = line.split("=", 1)
-                env[k.strip()] = v.strip().strip('"').strip("'")
-    return env
-
-
-ENV = _load_env(Path(__file__).resolve().parent / "backend" / ".env")
-
-
-def g(key, default=None):
-    return os.environ.get(key) or ENV.get(key, default)
+NOTIFIER = Path(
+    os.environ.get(
+        "ADMIN_NOTIFIER",
+        Path.home() / "Code" / "server-management" / "scripts" / "notify-admin.sh",
+    )
+)
 
 
 def main() -> int:
-    host = g("SMTP_HOST")
-    if not host:
-        print("SMTP not configured (no SMTP_HOST) — skipping email")
-        return 0
-    port = int(g("SMTP_PORT", "587"))
-    user, pw = g("SMTP_USER"), g("SMTP_PASS")
-    frm = g("SMTP_FROM", user or "noreply@smartmoviesearch.com")
-    to = g("ADMIN_EMAIL") or g("SMTP_TO")
-    if not to:
-        print("no ADMIN_EMAIL / SMTP_TO — skipping email")
-        return 0
-
     subject = sys.argv[1] if len(sys.argv) > 1 else "SmartMovieSearch notification"
     body = sys.argv[2] if len(sys.argv) > 2 else sys.stdin.read()
 
-    msg = MIMEText(body)
-    msg["Subject"] = subject
-    msg["From"] = frm
-    msg["To"] = to
-    msg["Date"] = formatdate(localtime=True)
-
-    try:
-        if port == 465:
-            smtp = smtplib.SMTP_SSL(host, port, timeout=30)
-        else:
-            smtp = smtplib.SMTP(host, port, timeout=30)
-            smtp.starttls(context=ssl.create_default_context())
-        with smtp:
-            if user and pw:
-                smtp.login(user, pw)
-            smtp.sendmail(frm, [to], msg.as_string())
-        print(f"emailed '{subject}' -> {to}")
+    if not NOTIFIER.exists():
+        print(f"admin notifier not found at {NOTIFIER} — skipping email", file=sys.stderr)
         return 0
-    except Exception as exc:
-        print(f"email failed: {exc}", file=sys.stderr)
-        return 1
+
+    # Tag the source app + severity so the shared log and subject line are useful.
+    env = dict(os.environ, APP=os.environ.get("APP", "smartmoviesearch"))
+    env.setdefault("SEVERITY", "error" if subject.startswith("🔴") else "info")
+
+    r = subprocess.run([str(NOTIFIER), subject], input=body, text=True, env=env)
+    return r.returncode
 
 
 if __name__ == "__main__":
