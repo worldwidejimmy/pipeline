@@ -91,6 +91,49 @@ if bks:
 else:
     line("\nBackups: NONE FOUND"); issues.append("no backups")
 
+# ── Off-site (Layer 3) freshness ──────────────────────────────────────────────
+# A local backup that never leaves the box isn't a backup. Ask the Dropbox pusher
+# whether the OFF-SITE copy is current; it exits non-zero when stale/missing.
+# NOTE: box-level concern living in an app-level check — move to a box-wide devops
+# check when one exists (see server-management/BACKUP-STRATEGY.md).
+OFFSITE = Path.home() / "Code/server-management/scripts/backup-to-dropbox.sh"
+if OFFSITE.exists():
+    try:
+        r = subprocess.run([str(OFFSITE), "--check"], capture_output=True, text=True, timeout=90)
+        msg = (r.stdout or r.stderr).strip().splitlines()[-1] if (r.stdout or r.stderr) else "no output"
+        line(f"\nOff-site (Dropbox): {msg.replace('[dropbox-backup] ', '')}")
+        if r.returncode != 0:
+            issues.append("off-site backup stale/missing")
+    except Exception as e:
+        line(f"\nOff-site (Dropbox): CHECK FAILED ({str(e)[:60]})")
+        issues.append("off-site check failed")
+
+# ── Unencrypted backup detector ───────────────────────────────────────────────
+# Anything not *.age is skipped by the Dropbox push (we only ship encrypted blobs),
+# so plaintext archives are silently NOT protected off-site. Nag so they get fixed.
+# Deliberate local-only artifacts (not app backups) — acknowledged, not nagged.
+PLAINTEXT_OK = ("pipeline-history",)   # git mirrors from the 2026-08 history purge
+plain: list[Path] = []
+for d in ("~/backups", "~/db-backups", "~/config-backups"):
+    root = Path(os.path.expanduser(d))
+    if not root.is_dir():
+        continue
+    for f in root.rglob("*"):
+        if not f.is_file() or f.suffix in (".age", ".tmp"):
+            continue
+        if any(ok in f.parts for ok in PLAINTEXT_OK):
+            continue
+        plain.append(f)
+if plain:
+    dirs = sorted({str(p.parent).replace(str(Path.home()), "~") for p in plain})
+    line(f"\nUnencrypted backups: {len(plain)} file(s) in {len(dirs)} dir(s) "
+         f"— these are NOT shipped off-site (Dropbox takes encrypted blobs only)")
+    for d in dirs[:4]:
+        line(f"  ⚠ {d}")
+    issues.append(f"{len(plain)} unencrypted backup file(s) (no off-site copy)")
+else:
+    line("\nUnencrypted backups: none ✓ (everything backed up is encrypted)")
+
 # ── Origin cert expiry ────────────────────────────────────────────────────────
 end = sh(["openssl", "x509", "-in", "/etc/ssl/sms-origin-cert.pem", "-noout", "-enddate"])
 if end.startswith("notAfter="):
