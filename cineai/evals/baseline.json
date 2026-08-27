@@ -1,0 +1,20 @@
+{
+  "hit_rate": 1.0,
+  "mrr": 0.8833,
+  "misses": [],
+  "content_coverage": 0.84,
+  "partial_coverage": [
+    "police-albums"
+  ],
+  "_note": "police-albums sits at 20% content coverage: the doc is retrieved but its discography spans chunks the window misses. Tracked as a KNOWN GAP, not a regression \u2014 the fix is header-aware chunking, not a bigger k (see below).",
+  "_topk_sweep_2026-08": {
+    "k6": {
+      "mrr": 0.883,
+      "police_cov": 0.2
+    },
+    "k16": {
+      "mrr": 0.77,
+      "police_cov": 0.6
+    }
+  }
+}

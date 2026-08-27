@@ -1,0 +1,20 @@
+{"id": "police-albums", "q": "show me all the albums the police made together not including compilations", "expect_sources": ["docs/music/artists/the-police.md"], "note": "THE regression case: RAG returned 1 of 5 albums because the discography spans chunks 2-4 and 2 of 6 slots went to unrelated docs", "expect_content": ["Outlandos", "Reggatta", "Zenyatta", "Ghost in the Machine", "Synchronicity"]}
+{"id": "police-formation", "q": "when did The Police form and who was in the band", "expect_sources": ["docs/music/artists/the-police.md"], "note": "same doc, different chunk \u2014 checks the doc is reachable by more than one phrasing"}
+{"id": "pinkfloyd-discography", "q": "what studio albums did Pink Floyd release", "expect_sources": ["docs/music/artists/pink-floyd.md"], "note": "MusicBrainz-generated doc; terse single-chunk, should rank top-1", "expect_content": ["Dark Side of the Moon", "Wish You Were Here", "The Wall"]}
+{"id": "cars-albums", "q": "which were The Cars most popular albums", "expect_sources": ["docs/music/artists/the-cars.md"], "note": "added after a live miss \u2014 guards the coverage gap from returning", "expect_content": ["Candy", "Heartbeat City"]}
+{"id": "miles-davis", "q": "Miles Davis albums", "expect_sources": ["docs/music/artists/miles-davis.md"], "note": "jazz; also present in iconic-albums.md so ranking matters"}
+{"id": "radiohead", "q": "tell me about Radiohead's music and style", "expect_sources": ["docs/music/artists/radiohead.md"], "note": "hand-written long-form doc (contrast with the terse generated ones)"}
+{"id": "nolan-style", "q": "Christopher Nolan's directing style", "expect_sources": ["docs/directors/christopher-nolan.md"], "note": "film-side equivalent; this query is in the UI's example chips"}
+{"id": "kubrick", "q": "what makes Stanley Kubrick's films distinctive", "expect_sources": ["docs/directors/stanley-kubrick.md"], "note": "director doc, thematic phrasing rather than a title"}
+{"id": "scorsese", "q": "Martin Scorsese crime films", "expect_sources": ["docs/directors/martin-scorsese.md"], "note": "director + genre; must not be hijacked by thriller-crime.md"}
+{"id": "best-1990s", "q": "best films of the 1990s", "expect_sources": ["docs/decades/best-of-1990s.md"], "note": "decade docs are near-identical in shape \u2014 a real discrimination test", "expect_content": ["1990"]}
+{"id": "best-1970s", "q": "greatest movies from the seventies", "expect_sources": ["docs/decades/best-of-1970s.md"], "note": "paraphrase, not the literal decade string \u2014 tests semantic not keyword match"}
+{"id": "heist", "q": "good bank heist movies", "expect_sources": ["docs/heist/bank-heist-films-guide.md"], "note": "UI example chip"}
+{"id": "horror-guide", "q": "classic horror films worth watching", "expect_sources": ["docs/classics/horror-guide.md"], "note": "genre guide"}
+{"id": "korean-cinema", "q": "Korean cinema and its major directors", "expect_sources": ["docs/international/korean-cinema.md"], "note": "international section"}
+{"id": "prestige-tv", "q": "best prestige TV dramas", "expect_sources": ["docs/tv/prestige-tv-guide.md"], "note": "TV rather than film \u2014 checks the TV doc is reachable"}
+{"id": "ebert-fargo", "q": "what did Roger Ebert think of Fargo", "expect_sources": ["ebert/fargo-1996"], "note": "the Ebert corpus is ~119k chunks; a named review must still surface", "expect_content": ["Fargo"]}
+{"id": "jazz-history", "q": "history of jazz music", "expect_sources": ["docs/music/genres/jazz-history.md"], "note": "music genre doc, not an artist"}
+{"id": "hiphop-history", "q": "how did hip hop develop", "expect_sources": ["docs/music/genres/hip-hop-history.md"], "note": "genre doc"}
+{"id": "iconic-albums", "q": "albums that changed music history", "expect_sources": ["docs/music/albums/iconic-albums.md"], "note": "the album-compilation doc"}
+{"id": "music-in-film", "q": "how music is used in movies", "expect_sources": ["docs/music/music-in-film.md"], "note": "cross-domain doc; must not collapse into a music-genre doc"}
