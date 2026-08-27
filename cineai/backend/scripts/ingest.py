@@ -25,7 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from langchain_community.document_loaders import TextLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from langchain_openai import OpenAIEmbeddings
 from pymilvus import (
@@ -48,6 +48,20 @@ DEFAULT_CHUNK_OVERLAP = 100
 BATCH_SIZE            = 50
 TEXT_MAX_LEN          = 8192   # Milvus VARCHAR limit per field; chunks are ~800 chars
 
+# ── Header-aware markdown chunking ──────────────────────────────────────────────
+# Hierarchical, largest-fitting-section strategy: prefer emitting one chunk per ##
+# (h2) group — its own text plus all ### children, joined, with ### heading lines
+# kept inline — so a "list all X" section (e.g. a 5-album discography) stays in a
+# SINGLE chunk instead of being spread across sibling chunks that compete for top_k
+# slots. A group only falls back to one-chunk-per-### (the old behavior) when it's
+# too big to combine (PARENT_SECTION_LEN). MAX_SECTION_LEN is the smaller cap used
+# for those per-### fallback chunks (and any headerless/no-##-parent content).
+MD_HEADERS_TO_SPLIT_ON = [("#", "h1"), ("##", "h2"), ("###", "h3")]
+TINY_SECTION_LEN        = 200                     # chunks shorter than this merge into the next one
+MAX_SECTION_LEN         = DEFAULT_CHUNK_SIZE * 2  # 1600 — per-### fallback chunks larger than this get sub-split
+PARENT_SECTION_LEN      = 3200                    # a whole ## group up to this size stays ONE chunk
+BREADCRUMB_HEADING_CAP  = 80                      # truncate an individual heading in the breadcrumb
+
 
 # ── Document loading ──────────────────────────────────────────────────────────
 
@@ -66,13 +80,181 @@ def load_files(path: Path) -> list[Document]:
     return docs
 
 
-def chunk_docs(docs: list[Document]) -> list[Document]:
-    splitter = RecursiveCharacterTextSplitter(
+def _recursive_splitter() -> RecursiveCharacterTextSplitter:
+    return RecursiveCharacterTextSplitter(
         chunk_size=DEFAULT_CHUNK_SIZE,
         chunk_overlap=DEFAULT_CHUNK_OVERLAP,
         separators=["\n\n", "\n", ". ", " ", ""],
     )
-    return splitter.split_documents(docs)
+
+
+def _breadcrumb(metadata: dict) -> str:
+    """Build a one-line heading-path breadcrumb, e.g. '# Title > ## Discography > ### Synchronicity (1983)'."""
+    parts = []
+    for prefix, key in MD_HEADERS_TO_SPLIT_ON:
+        if key in metadata:
+            heading = metadata[key].strip().replace("\n", " ")
+            if len(heading) > BREADCRUMB_HEADING_CAP:
+                heading = heading[: BREADCRUMB_HEADING_CAP - 1].rstrip() + "…"
+            parts.append(f"{prefix} {heading}")
+    return " > ".join(parts)
+
+
+def _group_key(meta: dict) -> tuple:
+    """(h1, h2) grouping key — h2 is None for content directly under h1 (no ## parent),
+    e.g. the h1 intro, or a doc that jumps straight from # to ###."""
+    return (meta.get("h1"), meta.get("h2"))
+
+
+def _reconstruct_group_text(group_sections: list[tuple[dict, str]]) -> str:
+    """Join a ## group's own text (if any) with its ### children back into one blob,
+    restoring the ### heading line inline (the breadcrumb covers h1/h2, not h3)."""
+    parts = []
+    for meta, body in group_sections:
+        if "h3" in meta:
+            heading = f"### {meta['h3'].strip()}"
+            parts.append(f"{heading}\n{body}" if body else heading)
+        elif body:
+            parts.append(body)
+    return "\n\n".join(parts)
+
+
+def _merge_tiny_candidates(candidates: list[dict]) -> list[dict]:
+    """Merge chunk candidates shorter than TINY_SECTION_LEN into the following candidate
+    (or the previous one, if the tiny candidate is last) so fragments — e.g. a two-line
+    '## See Also' group — don't become their own near-empty chunk. Applies uniformly
+    whether a candidate is a whole merged ## group or a per-### fallback chunk."""
+    merged: list[dict] = []
+    pending: list[str] = []
+
+    for cand in candidates:
+        text = cand["text"].strip()
+        if len(text) < TINY_SECTION_LEN:
+            if text:
+                pending.append(text)
+            continue
+        if pending:
+            text = "\n\n".join(pending + [text])
+            pending = []
+        merged.append({**cand, "text": text})
+
+    if pending:
+        leftover = "\n\n".join(pending)
+        if merged:
+            merged[-1] = {**merged[-1], "text": merged[-1]["text"] + "\n\n" + leftover}
+        else:
+            # Whole document was made of tiny candidates (e.g. a very short file) —
+            # keep it as a single chunk under the last candidate's breadcrumb/cap.
+            merged.append({**candidates[-1], "text": leftover})
+
+    return merged
+
+
+def _split_markdown_doc(doc: Document, header_splitter: MarkdownHeaderTextSplitter,
+                         recursive_splitter: RecursiveCharacterTextSplitter) -> list[Document]:
+    """Header-aware chunking for a single markdown Document.
+
+    Chosen approach: langchain's MarkdownHeaderTextSplitter (langchain-text-splitters is
+    already a project dependency) splits on ##/### boundaries, tracks the heading path per
+    section in .metadata, and already handles fenced code blocks (a '#' inside ``` isn't
+    mistaken for a header) and header-only sections with no body (it folds those forward
+    into the next section with content, so an empty '## Discography' line never becomes
+    its own section). Hand-rolling that correctly — especially the code-fence guard — would
+    just reimplement a well-tested piece of a library we already ship.
+
+    On top of it: sections are regrouped by their ## parent. A whole group (its own text +
+    all ### children, ### lines kept inline) is emitted as ONE chunk when it fits within
+    PARENT_SECTION_LEN — this is what keeps a "list all X" section (e.g. the Police's 5-album
+    discography) in a single retrievable chunk instead of scattering it across sibling
+    chunks that then compete for top_k slots. Only a group too big for that falls back to
+    one chunk per ### (breadcrumb includes h3, capped at the smaller MAX_SECTION_LEN — e.g.
+    Christopher Nolan's 13-film "## Film by Film"). Content with no ## parent (the h1 intro,
+    or a doc that goes straight from # to ###) is grouped the same way, keyed on h1 alone.
+    A final tiny-merge pass and per-candidate size cap + TEXT_MAX_LEN hard-truncate apply
+    uniformly regardless of which path produced the candidate.
+    """
+    raw_sections = header_splitter.split_text(doc.page_content)
+    sections = [(d.metadata, d.page_content.strip()) for d in raw_sections]
+    if not sections:
+        return []
+
+    # 1. Group consecutive sections sharing the same (h1, h2) key.
+    groups: list[tuple[tuple, list[tuple[dict, str]]]] = []
+    for meta, body in sections:
+        key = _group_key(meta)
+        if groups and groups[-1][0] == key:
+            groups[-1][1].append((meta, body))
+        else:
+            groups.append((key, [(meta, body)]))
+
+    # 2. Per group: emit as ONE chunk if it fits, else fall back to one chunk per ###.
+    candidates: list[dict] = []
+    for (h1, h2), group_sections in groups:
+        combined = _reconstruct_group_text(group_sections)
+        if not combined:
+            continue
+
+        if len(combined) <= PARENT_SECTION_LEN:
+            group_meta = {}
+            if h1 is not None:
+                group_meta["h1"] = h1
+            if h2 is not None:
+                group_meta["h2"] = h2
+            candidates.append({"breadcrumb": _breadcrumb(group_meta), "text": combined, "cap": PARENT_SECTION_LEN})
+        else:
+            for meta, body in group_sections:
+                if not body:
+                    continue
+                candidates.append({"breadcrumb": _breadcrumb(meta), "text": body, "cap": MAX_SECTION_LEN})
+
+    # 3. Merge tiny candidates forward (or backward, if last) — same rule at every level.
+    candidates = _merge_tiny_candidates(candidates)
+
+    # 4. Sub-split any candidate that still exceeds its cap; prepend breadcrumb; hard-cap.
+    chunks: list[Document] = []
+    for cand in candidates:
+        breadcrumb, body, cap = cand["breadcrumb"], cand["text"], cand["cap"]
+
+        if len(body) > cap:
+            sub_bodies = [
+                d.page_content
+                for d in recursive_splitter.split_documents([Document(page_content=body, metadata={})])
+            ]
+        else:
+            sub_bodies = [body]
+
+        for sub_body in sub_bodies:
+            text = f"{breadcrumb}\n{sub_body}" if breadcrumb else sub_body
+            if len(text) > TEXT_MAX_LEN:  # defensive: Milvus VARCHAR cap, should not trigger in practice
+                text = text[:TEXT_MAX_LEN]
+            chunks.append(Document(page_content=text, metadata=dict(doc.metadata)))
+
+    return chunks
+
+
+def chunk_docs(docs: list[Document]) -> list[Document]:
+    """Chunk loaded documents for embedding.
+
+    - .md files: header-aware — split on ##/### boundaries so a whole section (e.g. a
+      discography entry) stays in one chunk instead of being cut every 800 chars. See
+      _split_markdown_doc for the approach and rationale.
+    - everything else (.txt): unchanged — the original flat RecursiveCharacterTextSplitter,
+      chunk_size=800/overlap=100, applied per document (identical output to before).
+    """
+    recursive_splitter = _recursive_splitter()
+    header_splitter = MarkdownHeaderTextSplitter(
+        headers_to_split_on=MD_HEADERS_TO_SPLIT_ON,
+        strip_headers=True,
+    )
+
+    chunks: list[Document] = []
+    for doc in docs:
+        source = doc.metadata.get("source", "")
+        if Path(source).suffix.lower() == ".md":
+            chunks.extend(_split_markdown_doc(doc, header_splitter, recursive_splitter))
+        else:
+            chunks.extend(recursive_splitter.split_documents([doc]))
+    return chunks
 
 
 # ── Collection management ─────────────────────────────────────────────────────
@@ -181,14 +363,45 @@ def embed_and_insert(client: MilvusClient, cfg, chunks: list[Document]) -> int:
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
+def _print_dry_run_summary(chunks: list[Document]) -> None:
+    by_source: dict[str, list[Document]] = {}
+    for c in chunks:
+        by_source.setdefault(c.metadata.get("source", "unknown"), []).append(c)
+
+    print(f"\n  → {len(chunks)} total chunk(s) across {len(by_source)} file(s)\n")
+    for source, cs in by_source.items():
+        print(f"  {source}  ({len(cs)} chunk(s))")
+        for i, c in enumerate(cs):
+            size = len(c.page_content)
+            preview = c.page_content[:60].replace("\n", " ")
+            flag = "  ⚠ OVER TEXT_MAX_LEN" if size > TEXT_MAX_LEN else ""
+            print(f"    [{i}] {size:>5} chars: {preview!r}{flag}")
+    print()
+
+
 def main() -> None:
     args    = [a for a in sys.argv[1:] if not a.startswith("--")]
     reset   = "--reset" in sys.argv
+    dry_run = "--dry-run" in sys.argv
     target  = Path(args[0]) if args else Path("docs")
 
     if not target.exists():
         print(f"ERROR: Path not found: {target}")
         sys.exit(1)
+
+    if dry_run:
+        print(f"\nCineAI Ingest — DRY RUN (no Milvus/OpenAI calls)")
+        print(f"  Source    : {target.resolve()}")
+        print()
+        print("Loading documents...")
+        docs = load_files(target)
+        if not docs:
+            print("No supported files found (.txt, .md)")
+            sys.exit(1)
+        print(f"\nChunking {len(docs)} document(s)...")
+        chunks = chunk_docs(docs)
+        _print_dry_run_summary(chunks)
+        return
 
     cfg = get_config()
     print(f"\nCineAI Hybrid Ingest")
