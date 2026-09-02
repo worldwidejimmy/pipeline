@@ -66,6 +66,12 @@ privacy-audit: ## Scan the whole tree (and `make privacy-audit-history` for git 
 privacy-audit-history: ## Privacy audit incl. full git history (slower; reports already-published leaks)
 	cd .. && scripts/privacy-audit.sh --history
 
+eval-t2: ## T2 retrieval evals — free (embeddings only), gates on evals/baseline.json
+	docker compose cp evals/run_evals.py backend:/app/evals/run_evals.py
+	docker compose cp evals/datasets/retrieval.jsonl backend:/app/evals/datasets/retrieval.jsonl
+	docker compose cp evals/baseline.json backend:/app/evals/baseline.json
+	docker compose exec -T backend python3 /app/evals/run_evals.py --tier t2
+
 test-unit: ## Backend unit tests (usage.py etc.) — free, no Docker/API keys needed
 	@test -x $(BACKEND_DIR)/.tests-venv/bin/python || \
 		(python3 -m venv $(BACKEND_DIR)/.tests-venv && \

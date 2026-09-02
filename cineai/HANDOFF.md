@@ -560,3 +560,19 @@ The app is running live on the OVH VPS (behind Cloudflare — direct IP not list
 | `frontend/src/components/EventLog.tsx` | Change how events are displayed |
 | `frontend/src/App.tsx` | Change layout, theme toggle, add new UI features |
 | `backend/docs/` | Add more movie knowledge for RAG |
+
+## Evals (added 2026-08)
+
+`EVALS-PLAN.md` = the roadmap (5 tiers, cheapest first). Implemented so far:
+- **T0 parse/contract** — `evals/fixtures/llm_outputs.jsonl` replayed through the real
+  `parse_llm_json` + supervisor route normalization in `make test-unit` (free, every
+  commit). Exists because ```json-fenced replies silently broke TMDB lookups for weeks.
+- **T2 retrieval** — `make eval-t2`: 20 golden cases, hit@k/MRR **and content coverage**
+  (hit@k alone passed during the real Police outage — the doc surfaced, the album chunks
+  didn't). Free: embeddings only, calls `retrieve()` directly so it never touches the
+  30/day cap. Gates on `evals/baseline.json`; run it after any chunking/TOP_K/embedding/
+  corpus change. Baseline bumps are deliberate commits with the reasoning in `_note`.
+
+Track record: the T2 eval rejected the first chunking rewrite (per-### sections, 40%
+coverage + a new MISS) and validated the second (hierarchical largest-fitting-section,
+100% coverage, MRR trade accepted). Details in the git log for `backend/scripts/ingest.py`.

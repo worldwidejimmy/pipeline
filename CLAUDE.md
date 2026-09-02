@@ -25,7 +25,7 @@ streaming answer. The app lives under `cineai/`.
 
 ## Build / test / run
 - Run stack: `cd cineai && docker compose up -d`; inspect: `docker compose ps` / `docker compose logs -f <svc>`.
-- Tasks/tests: `cineai/Makefile` — run `make` to list targets. `make test-e2e` = Playwright browser test of the running stack (costs 1 search + tokens).
+- Tasks/tests: `cineai/Makefile` — run `make` to list targets. `make test-e2e` = Playwright browser test of the running stack (costs 1 search + tokens). `make eval-t2` = retrieval evals (free, no LLM); run after ANY chunking/TOP_K/embedding/corpus change — it gates on `cineai/evals/baseline.json` (bumping the baseline is a deliberate, reviewable commit). Full eval roadmap: `cineai/EVALS-PLAN.md`.
 - `cineai/devops_check.py` — health/devops checks · `cineai/backup.sh` — backups.
 
 ## Gotchas
