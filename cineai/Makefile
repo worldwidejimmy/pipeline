@@ -67,6 +67,7 @@ privacy-audit-history: ## Privacy audit incl. full git history (slower; reports 
 	cd .. && scripts/privacy-audit.sh --history
 
 eval-t2: ## T2 retrieval evals — free (embeddings only), gates on evals/baseline.json
+	$(COMPOSE) exec -T backend mkdir -p /app/evals/datasets
 	docker compose cp evals/run_evals.py backend:/app/evals/run_evals.py
 	docker compose cp evals/datasets/retrieval.jsonl backend:/app/evals/datasets/retrieval.jsonl
 	docker compose cp evals/baseline.json backend:/app/evals/baseline.json
