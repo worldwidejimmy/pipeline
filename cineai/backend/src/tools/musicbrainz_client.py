@@ -1,6 +1,7 @@
 """MusicBrainz API client — free, open music database (no API key required)."""
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
 
@@ -13,6 +14,36 @@ _HEADERS = {
 }
 _BASE = "https://musicbrainz.org/ws/2"
 _TIMEOUT = 10
+
+# MusicBrainz allows ~1 request/second per client and answers 503 when exceeded.
+# An artist lookup is two back-to-back requests (search, then details), so without
+# spacing the second one intermittently 503'd and the WHOLE answer became an error
+# (caught by the T4 "cars" canary running right after "police-albums").
+_MIN_INTERVAL_S = 1.1
+_RETRY_DELAYS_S = (1.5, 3.0)
+_gate = asyncio.Lock()
+_last_call = 0.0
+
+
+async def _get(path: str, params: dict) -> dict:
+    """GET a MusicBrainz endpoint: process-wide 1 req/s spacing + retry on 503/429."""
+    global _last_call
+    for attempt in range(len(_RETRY_DELAYS_S) + 1):
+        async with _gate:
+            wait = _MIN_INTERVAL_S - (time.monotonic() - _last_call)
+            if wait > 0:
+                await asyncio.sleep(wait)
+            try:
+                async with httpx.AsyncClient(timeout=_TIMEOUT, headers=_HEADERS) as client:
+                    resp = await client.get(f"{_BASE}/{path}", params=params)
+            finally:
+                _last_call = time.monotonic()
+        if resp.status_code in (429, 503) and attempt < len(_RETRY_DELAYS_S):
+            await asyncio.sleep(_RETRY_DELAYS_S[attempt])
+            continue
+        resp.raise_for_status()
+        return resp.json()
+    raise RuntimeError("unreachable")
 
 
 def _fmt_release_group(rg: dict) -> dict:
@@ -32,13 +63,7 @@ def _fmt_release_group(rg: dict) -> dict:
 async def search_artist(name: str) -> dict[str, Any]:
     """Search MusicBrainz for an artist by name. Returns top 3 matches."""
     t0 = time.time()
-    async with httpx.AsyncClient(timeout=_TIMEOUT, headers=_HEADERS) as client:
-        resp = await client.get(
-            f"{_BASE}/artist",
-            params={"query": name, "limit": 3, "fmt": "json"},
-        )
-        resp.raise_for_status()
-        data = resp.json()
+    data = await _get("artist", {"query": name, "limit": 3, "fmt": "json"})
 
     artists = []
     for a in data.get("artists", []):
@@ -62,16 +87,7 @@ async def search_artist(name: str) -> dict[str, Any]:
 async def get_artist_details(mbid: str) -> dict[str, Any]:
     """Fetch full artist details including release groups (albums/EPs/singles)."""
     t0 = time.time()
-    async with httpx.AsyncClient(timeout=_TIMEOUT, headers=_HEADERS) as client:
-        resp = await client.get(
-            f"{_BASE}/artist/{mbid}",
-            params={
-                "inc": "release-groups+ratings+tags+aliases",
-                "fmt": "json",
-            },
-        )
-        resp.raise_for_status()
-        data = resp.json()
+    data = await _get(f"artist/{mbid}", {"inc": "release-groups+ratings+tags+aliases", "fmt": "json"})
 
     # Separate and sort release groups by type then year
     release_groups = [_fmt_release_group(rg) for rg in data.get("release-groups", [])]
@@ -106,13 +122,7 @@ async def get_artist_details(mbid: str) -> dict[str, Any]:
 async def search_release(query: str) -> dict[str, Any]:
     """Search for a specific album or release by name."""
     t0 = time.time()
-    async with httpx.AsyncClient(timeout=_TIMEOUT, headers=_HEADERS) as client:
-        resp = await client.get(
-            f"{_BASE}/release-group",
-            params={"query": query, "limit": 5, "fmt": "json"},
-        )
-        resp.raise_for_status()
-        data = resp.json()
+    data = await _get("release-group", {"query": query, "limit": 5, "fmt": "json"})
 
     results = [_fmt_release_group(rg) for rg in data.get("release-groups", [])]
     return {

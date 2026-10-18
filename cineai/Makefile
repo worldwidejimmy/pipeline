@@ -67,11 +67,16 @@ privacy-audit-history: ## Privacy audit incl. full git history (slower; reports 
 	cd .. && scripts/privacy-audit.sh --history
 
 eval-t2: ## T2 retrieval evals — free (embeddings only), gates on evals/baseline.json
-	$(COMPOSE) exec -T backend mkdir -p /app/evals/datasets
-	docker compose cp evals/run_evals.py backend:/app/evals/run_evals.py
-	docker compose cp evals/datasets/retrieval.jsonl backend:/app/evals/datasets/retrieval.jsonl
-	docker compose cp evals/baseline.json backend:/app/evals/baseline.json
-	docker compose exec -T backend python3 /app/evals/run_evals.py --tier t2
+	$(COMPOSE) exec -T backend python3 /app/evals/run_evals.py --tier t2
+
+eval-t1: ## T1 routing evals — supervisor only, ~48 tiny LLM calls (<$0.01)
+	$(COMPOSE) exec -T backend python3 /app/evals/run_evals.py --tier t1
+
+eval-t4: ## T4 canaries + T5 cost/latency — 6 full-pipeline queries (~$0.01)
+	$(COMPOSE) exec -T backend python3 /app/evals/run_evals.py --tier t4
+
+eval-nightly: ## T1+T2+T4+T5 — what the nightly timer runs; non-zero exit on regression
+	$(COMPOSE) exec -T backend python3 /app/evals/run_evals.py --tier nightly
 
 test-unit: ## Backend unit tests (usage.py etc.) — free, no Docker/API keys needed
 	@test -x $(BACKEND_DIR)/.tests-venv/bin/python || \

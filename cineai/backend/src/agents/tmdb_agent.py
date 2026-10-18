@@ -12,7 +12,7 @@ import asyncio
 import json
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from src.llm import get_chat, parse_llm_json
+from src.llm import get_chat, parse_llm_json, text_of
 
 from src.config import get_config
 from src.tools import tmdb_client
@@ -57,6 +57,8 @@ _ANSWER_SYSTEM = """You are a knowledgeable film and TV expert assistant.
 
 Answer the user's question using ONLY the TMDB data provided below.
 Be specific — cite titles, ratings (vote_average), cast members, release years.
+For a single film or show, always name the director(s) / creator(s) from the crew
+data when present — who made it is as essential as who is in it.
 Format your answer clearly. Use bullet points or a ranked list for comparisons.
 When filmography data is available, rank the person's movies by rating and place
 the title in question within that ranked list.
@@ -112,11 +114,11 @@ async def tmdb_agent_node(state: dict) -> dict:
     ])
 
     try:
-        intent = parse_llm_json(intent_resp.content)
+        intent = parse_llm_json(text_of(intent_resp.content))
     except Exception:
         # Searching TMDB for the raw question rarely matches a title — log it
         # so a broken extraction shows up in `docker compose logs backend`.
-        print(f"[tmdb_agent] intent extraction unparseable, falling back to raw question: {intent_resp.content[:120]!r}")
+        print(f"[tmdb_agent] intent extraction unparseable, falling back to raw question: {text_of(intent_resp.content)[:120]!r}")
         intent = {"search_type": "search_title", "query": question}
 
     search_type = intent.get("search_type", "search_movie")
@@ -221,7 +223,13 @@ async def tmdb_agent_node(state: dict) -> dict:
             detail = await tmdb_client.get_movie_details(
                 top["id"], top.get("media_type", "movie")
             )
-            tmdb_data = {"search": search_result, "detail": detail}
+            # Detail FIRST and other matches compact: the payload is cut at char_limit
+            # below, and with full search results first (~5k chars of overviews) the
+            # detail's crew — the director — was being truncated away. Found by the
+            # T4 "inception" canary (evals/datasets/canaries.jsonl).
+            others = [{k: r.get(k) for k in ("id", "title", "year", "rating", "media_type")}
+                      for r in search_result.get("results", [])[1:5]]
+            tmdb_data = {"detail": detail, "other_matches": others}
 
     # Step 3: Generate grounded answer
     # title_and_person queries carry more data — give the LLM more room
@@ -236,6 +244,6 @@ async def tmdb_agent_node(state: dict) -> dict:
     ])
 
     return {
-        "tmdb_result": answer_resp.content,
+        "tmdb_result": text_of(answer_resp.content),
         "_tmdb_raw": tmdb_data,  # carried in state for frontend events
     }

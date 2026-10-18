@@ -1,0 +1,48 @@
+{"id": "movie-inception", "q": "Tell me about the movie Inception", "expect": "tmdb", "accept": ["tmdb+rag"], "why": "specific title"}
+{"id": "director-parasite", "q": "Who directed Parasite?", "expect": "tmdb", "accept": ["tmdb+rag"], "why": "person on a title"}
+{"id": "runtime-oppenheimer", "q": "What is the runtime of Oppenheimer?", "expect": "tmdb", "accept": [], "why": "runtime → tmdb"}
+{"id": "cast-breakingbad", "q": "Who plays Walter White in Breaking Bad?", "expect": "tmdb", "accept": [], "why": "TV cast"}
+{"id": "seasons-office", "q": "How many seasons does The Office have?", "expect": "tmdb", "accept": [], "why": "seasons → tmdb", "holdout": true}
+{"id": "trending-week", "q": "What movies are trending this week?", "expect": "tmdb", "accept": ["tmdb+search"], "why": "trending → tmdb"}
+{"id": "rt-dune", "q": "What's the Rotten Tomatoes score for Dune Part Two?", "expect": "tmdb", "accept": [], "why": "forced keyword: rotten tomatoes"}
+{"id": "episode-got", "q": "What episode does Ned Stark die in Game of Thrones", "expect": "tmdb", "accept": [], "why": "forced keyword: what episode"}
+{"id": "boxoffice-barbie", "q": "Box office numbers for Barbie", "expect": "tmdb", "accept": [], "why": "forced keyword: box office (beats the search rule)"}
+{"id": "filmography-pugh", "q": "What other films has Florence Pugh been in?", "expect": "tmdb", "accept": [], "why": "actor filmography", "holdout": true}
+{"id": "severance", "q": "Is Severance a good show and who is in it?", "expect": "tmdb", "accept": ["tmdb+rag"], "why": "TV title"}
+{"id": "new-wave", "q": "Explain the French New Wave and its influence", "expect": "rag", "accept": ["tmdb+rag"], "why": "film history → rag"}
+{"id": "mise-en-scene", "q": "What is mise-en-scène?", "expect": "rag", "accept": [], "why": "film theory term"}
+{"id": "film-noir", "q": "How did film noir develop in the 1940s?", "expect": "rag", "accept": ["tmdb+rag"], "why": "historical context"}
+{"id": "wes-anderson", "q": "What defines Wes Anderson's visual style?", "expect": "rag", "accept": ["tmdb+rag"], "why": "director style", "holdout": true}
+{"id": "kuleshov", "q": "Explain the Kuleshov effect", "expect": "rag", "accept": [], "why": "theory"}
+{"id": "neorealism", "q": "What are the hallmarks of Italian neorealism?", "expect": "rag", "accept": ["tmdb+rag"], "why": "movement"}
+{"id": "long-takes", "q": "How has the use of long takes evolved in cinema?", "expect": "rag", "accept": ["tmdb+rag"], "why": "cinematography"}
+{"id": "citizen-kane", "q": "Why is Citizen Kane considered so important to film history?", "expect": "tmdb+rag", "accept": ["rag"], "why": "title + historical significance"}
+{"id": "opening-weekend", "q": "What movies are opening in theaters this weekend?", "expect": "search", "accept": ["tmdb+search", "tmdb"], "why": "this weekend → search", "holdout": true}
+{"id": "bond-casting", "q": "Any news about the next James Bond casting?", "expect": "search", "accept": ["tmdb+search"], "why": "recent news"}
+{"id": "festival-winner", "q": "Who won the top prize at the film festival that wrapped up yesterday?", "expect": "search", "accept": ["tmdb+search"], "why": "very recent event"}
+{"id": "tlou-news", "q": "What's the latest news on the new season of The Last of Us?", "expect": "tmdb+search", "accept": ["search"], "why": "airing show + news"}
+{"id": "stranger-things", "q": "Is the new Stranger Things season out yet and what are people saying about it?", "expect": "tmdb+search", "accept": ["search"], "why": "airing show + reception"}
+{"id": "blade-runner", "q": "What is Blade Runner about and how does it fit into the history of sci-fi film?", "expect": "tmdb+rag", "accept": ["all"], "why": "what is X + historically", "holdout": true}
+{"id": "seven-samurai", "q": "Tell me about Seven Samurai and its influence on westerns", "expect": "tmdb+rag", "accept": ["rag"], "why": "title + influence"}
+{"id": "vertigo", "q": "What is Vertigo about and why do critics rate it so highly?", "expect": "tmdb+rag", "accept": ["rag"], "why": "title + critical context"}
+{"id": "radiohead", "q": "Tell me about the band Radiohead", "expect": "music", "accept": [], "why": "band"}
+{"id": "beatles-members", "q": "Who were the members of The Beatles?", "expect": "music", "accept": [], "why": "band members (forced keyword)"}
+{"id": "kendrick-genre", "q": "What genre is Kendrick Lamar?", "expect": "music", "accept": [], "why": "artist genre", "holdout": true}
+{"id": "hallelujah", "q": "Who wrote the song Hallelujah?", "expect": "music", "accept": [], "why": "forced keyword: who wrote"}
+{"id": "fleetwood-disco", "q": "Show me the discography of Fleetwood Mac", "expect": "music", "accept": [], "why": "forced keyword: discography"}
+{"id": "bohemian-lyrics", "q": "What are the lyrics about in Bohemian Rhapsody?", "expect": "music", "accept": [], "why": "forced keyword: lyrics"}
+{"id": "nirvana-debut", "q": "What was Nirvana's debut album?", "expect": "music", "accept": [], "why": "forced keyword: debut album"}
+{"id": "miles-davis", "q": "Tell me about Miles Davis", "expect": "music", "accept": ["tmdb+music"], "why": "jazz musician", "holdout": true}
+{"id": "zimmer", "q": "What films has Hans Zimmer scored?", "expect": "tmdb+music", "accept": ["music"], "why": "film composer"}
+{"id": "greenwood", "q": "Tell me about Jonny Greenwood's film scores", "expect": "tmdb+music", "accept": ["music"], "why": "film composer"}
+{"id": "gaga-acting", "q": "Which movies has Lady Gaga acted in?", "expect": "tmdb+music", "accept": ["tmdb"], "why": "musician who acts"}
+{"id": "talking-heads-doc", "q": "Is there a concert documentary about Talking Heads?", "expect": "tmdb+music", "accept": ["music"], "why": "concert documentary"}
+{"id": "morricone", "q": "What music did Ennio Morricone write for Sergio Leone's westerns?", "expect": "tmdb+music", "accept": ["music", "all"], "why": "composer + films", "holdout": true}
+{"id": "swift-new", "q": "Did Taylor Swift release a new song this month?", "expect": "music+search", "accept": ["search"], "why": "new music release"}
+{"id": "radiohead-new", "q": "Has Radiohead announced any new music recently?", "expect": "music+search", "accept": ["search"], "why": "recent music news"}
+{"id": "ai-film-trend", "q": "How does this week's debate about AI in filmmaking compare to earlier technology shifts in cinema history?", "expect": "rag+search", "accept": ["all", "search"], "why": "stored history + current news"}
+{"id": "movie-night", "q": "Recommend something to watch tonight — I love moody 70s thrillers with great soundtracks", "expect": "all", "accept": ["tmdb+rag", "tmdb+music"], "why": "general recommendation with context"}
+{"id": "plan-night", "q": "Plan a movie night: a classic film, its soundtrack, and any recent news about a remake", "expect": "all", "accept": [], "why": "needs every source", "holdout": true}
+{"id": "beatles-hdn", "q": "What albums did the Beatles release around the time of A Hard Day's Night?", "expect": "music", "accept": [], "why": "forced keyword 'albums' wins over the film title"}
+{"id": "interstellar-score", "q": "Who composed the score for Interstellar?", "expect": "tmdb+music", "accept": ["tmdb", "music"], "why": "film score"}
+{"id": "heist-best", "q": "What are the best heist movies of all time?", "expect": "rag", "accept": ["tmdb+rag", "tmdb"], "why": "KB has a heist guide; tmdb acceptable"}

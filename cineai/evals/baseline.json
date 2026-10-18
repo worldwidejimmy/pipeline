@@ -1,8 +1,26 @@
 {
-  "hit_rate": 1.0,
-  "mrr": 0.825,
-  "misses": [],
-  "content_coverage": 1.0,
-  "partial_coverage": [],
-  "_note": "Baseline bumped 2026-08-27 after hierarchical chunking (round 2). Deliberate trade accepted: MRR 0.883->0.825 (a few rank-1s now rank-2; larger merged sections embed more diffusely) in exchange for content coverage 84%->100% \u2014 police-albums, THE historical bug, now retrieves all 5 albums in one chunk. hit@k 100%. Round history: flat-800 chunking cov 20% MRR .883 | per-### cov 40% MRR .800 + music-in-film MISS | hierarchical cov 100% MRR .825, no misses."
+  "_note": "Per-tier regression baselines read by evals/run_evals.py. Bumping a value is a deliberate, reviewable commit \u2014 never auto-written.",
+  "t2": {
+    "hit_rate": 1.0,
+    "mrr": 0.825,
+    "misses": [],
+    "content_coverage": 1.0,
+    "partial_coverage": [],
+    "_note": "Baseline bumped 2026-08-27 after hierarchical chunking (round 2). Deliberate trade accepted: MRR 0.883->0.825 (a few rank-1s now rank-2; larger merged sections embed more diffusely) in exchange for content coverage 84%->100% \u2014 police-albums, THE historical bug, now retrieves all 5 albums in one chunk. hit@k 100%. Round history: flat-800 chunking cov 20% MRR .883 | per-### cov 40% MRR .800 + music-in-film MISS | hierarchical cov 100% MRR .825, no misses."
+  },
+  "t1": {
+    "accuracy": 0.979,
+    "tolerance": 0.06,
+    "failures": [],
+    "_note": "2026-10-18, claude-haiku-5-5: 48/48 and 47/48 on consecutive runs (heist-best flips rag/all). New-generation models can't run at temperature 0, so the gate tolerates ~3 cases of noise; 'failures' lists accepted chronic misroutes (none)."
+  },
+  "t4": {
+    "failures": [],
+    "_note": "2026-10-18, claude-haiku-5-5: 6/6. The inception canary found a real bug on day one: the TMDB payload was cut at 6000 chars with search results first, truncating the crew \u2014 no director in any film answer, on Haiku 4.5 AND 5.5."
+  },
+  "t5": {
+    "p95_ms": 13500,
+    "tokens_per_query": 5900,
+    "_note": "2026-10-18, claude-haiku-5-5: p50 5.6-8.2s, p95 ~13.4s, ~5.2-5.9k tok/q, ~$0.001/q (Haiku 4.5 on the same canaries: p50 8.4s, $0.0072/q). Gate fires at >2x either value."
+  }
 }

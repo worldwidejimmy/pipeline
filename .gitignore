@@ -53,3 +53,6 @@ docs/personal/
 id_rsa*
 id_ed25519*
 .tests-venv/
+
+# Eval run outputs (history + latest.json) — written by the backend container, never committed
+cineai/evals/results/
