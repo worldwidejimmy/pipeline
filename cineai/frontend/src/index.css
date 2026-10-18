@@ -1978,6 +1978,7 @@ html, body, #root {
   background: var(--surface2);
 }
 .cmp-col-title { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--text); }
+.cmp-letter { font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #fff; padding: 2px 7px; border-radius: 999px; }
 .cmp-col-sub { display: block; font-size: 10px; color: var(--text-muted); margin-top: 2px; }
 .cmp-col-body { padding: 12px; font-size: 13px; line-height: 1.6; flex: 1; min-height: 60px; }
 .cmp-thinking { color: var(--text-muted); font-style: italic; font-size: 12px; }

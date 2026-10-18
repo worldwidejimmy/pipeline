@@ -61,6 +61,7 @@ export default function App() {
   const [showAdmin,  setShowAdmin]  = useState(false)
 
   // RAG-vs-no-RAG compare mode
+  // Default is the normal RAG pipeline; compare is opt-in per session (never persisted).
   const [compareMode,  setCompareMode]  = useState(false)
   const [compareActive, setCompareActive] = useState(false)
   const [cmpRag,    setCmpRag]    = useState('')
@@ -70,6 +71,7 @@ export default function App() {
   const [cmpBaseTokens, setCmpBaseTokens] = useState<CompareTokens | null>(null)
   const [cmpJudge,      setCmpJudge]      = useState('')
   const [cmpJudgeASide, setCmpJudgeASide] = useState<'rag' | 'base' | null>(null)
+  const [cmpShownFirst, setCmpShownFirst] = useState<'rag' | 'base' | null>(null)
 
   const refreshUsage = useCallback(() => {
     fetchUsage().then(setUsage).catch(() => {})
@@ -115,7 +117,7 @@ export default function App() {
     setCompareActive(false)
     setCmpRag(''); setCmpBase('')
     setCmpChunks([]); setCmpRagTokens(null); setCmpBaseTokens(null)
-    setCmpJudge(''); setCmpJudgeASide(null)
+    setCmpJudge(''); setCmpJudgeASide(null); setCmpShownFirst(null)
   }, [])
 
   const startNewConversation = useCallback(() => {
@@ -231,7 +233,7 @@ export default function App() {
     setCompareActive(true)
     setCmpRag(''); setCmpBase('')
     setCmpChunks([]); setCmpRagTokens(null); setCmpBaseTokens(null)
-    setCmpJudge(''); setCmpJudgeASide(null)
+    setCmpJudge(''); setCmpJudgeASide(null); setCmpShownFirst(null)
     setTurnNum(p => p + 1)
 
     let rag = '', base = '', judge = ''
@@ -266,7 +268,11 @@ export default function App() {
       if (p.side === 'rag') setCmpRagTokens(t); else setCmpBaseTokens(t)
     })
     es.addEventListener('judge_start', (e: MessageEvent) => {
-      try { setCmpJudgeASide(JSON.parse(e.data).a_side ?? null) } catch { /* ignore */ }
+      try {
+        const p = JSON.parse(e.data)
+        setCmpJudgeASide(p.a_side ?? null)
+        setCmpShownFirst(p.shown_first ?? null)
+      } catch { /* ignore */ }
     })
     es.addEventListener('judge_token', (e: MessageEvent) => {
       try {
@@ -598,6 +604,7 @@ export default function App() {
                 baseTokens={cmpBaseTokens}
                 judgeText={cmpJudge}
                 judgeASide={cmpJudgeASide}
+                judgeShownFirst={cmpShownFirst}
                 streaming={isStreaming}
               />
             </div>

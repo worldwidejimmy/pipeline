@@ -7,8 +7,8 @@ Answers the same question two ways and streams both side by side:
 
 then runs a BLIND judge: a third LLM call receives both answers in random
 order labeled A/B, is NOT told which used retrieval, and rules on which is
-stronger. The frontend reveals the mapping after the verdict — the cleanest
-demo of whether retrieval actually helped.
+stronger. Its labels are then normalised (src/judge_labels.py) so "Answer A"
+always means the left/RAG column; the true order is sent as `shown_first`.
 
 Alongside its own compare_* events the stream emits the standard pipeline
 events (pipeline_start / agent_* / llm_* / chunks_retrieved / done) so the
@@ -25,6 +25,7 @@ from typing import AsyncIterator
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from src.judge_labels import LabelNormaliser
 from src.llm import get_chat, model_id
 from src.tools.milvus_retriever import retrieve
 from src import usage
@@ -57,8 +58,9 @@ directly they answer the question.
 Reply in markdown, at most ~150 words:
 **Verdict:** Answer A / Answer B / Tie — one sentence why.
 
-Then 2-3 bullets on the concrete differences that decided it. Do not speculate
-about which answer used documents."""
+Then 2-3 bullets on the concrete differences that decided it. Always name them in
+full as "Answer A" / "Answer B" (never a bare "A"). Do not speculate about which
+answer used documents."""
 
 
 def _sse(event_type: str, payload: dict) -> str:
@@ -78,7 +80,7 @@ async def compare_stream(question: str, ip: str | None = None) -> AsyncIterator[
       compare_token    {side: 'rag'|'base', content}
       compare_side_end {side, prompt_tokens, completion_tokens}
       compare_error    {side, message}
-      judge_start      {a_side}           # which side is "Answer A" (revealed to UI only)
+      judge_start      {a_side, shown_first} # a_side is always "rag" (labels normalised); shown_first = true order
       judge_token      {content}
       judge_end        {a_side, prompt_tokens, completion_tokens}
       compare_done     {total_prompt_tokens, total_completion_tokens, latency_ms}
@@ -168,7 +170,10 @@ async def compare_stream(question: str, ip: str | None = None) -> AsyncIterator[
     if answers["rag"].strip() and answers["base"].strip():
         a_side = random.choice(["rag", "base"])
         b_side = "base" if a_side == "rag" else "rag"
-        yield _sse("judge_start", {"a_side": a_side})
+        # The judge saw a random order; its labels are normalised below so the UI
+        # can always say Answer A = left column = RAG. shown_first records the truth.
+        relabel = LabelNormaliser(swap=(a_side == "base"))
+        yield _sse("judge_start", {"a_side": "rag", "shown_first": a_side})
         yield _sse("agent_start", {"agent": "judge"})
         yield _sse("llm_start", {"agent": "judge", "model": model_id()})
         t_judge = time.time()
@@ -185,15 +190,20 @@ async def compare_stream(question: str, ip: str | None = None) -> AsyncIterator[
             async for chunk in _llm(max_tokens=400).astream(judge_messages):
                 full = chunk if full is None else full + chunk
                 content = chunk.content if isinstance(getattr(chunk, "content", None), str) else ""
-                if content:
-                    yield _sse("judge_token", {"content": content})
+                out = relabel.feed(content) if content else ""
+                if out:
+                    yield _sse("judge_token", {"content": out})
+            tail = relabel.flush()
+            if tail:
+                yield _sse("judge_token", {"content": tail})
             um = getattr(full, "usage_metadata", None) or {}
             p = um.get("input_tokens", 0) or 0
             c = um.get("output_tokens", 0) or 0
             totals["prompt"] += p
             totals["completion"] += c
             yield _sse("llm_end", {"agent": "judge", "prompt_tokens": p, "completion_tokens": c})
-            yield _sse("judge_end", {"a_side": a_side, "prompt_tokens": p, "completion_tokens": c})
+            yield _sse("judge_end", {"a_side": "rag", "shown_first": a_side,
+                                     "prompt_tokens": p, "completion_tokens": c})
         except Exception as exc:
             yield _sse("compare_error", {"side": "judge", "message": str(exc)[:200]})
         finally:

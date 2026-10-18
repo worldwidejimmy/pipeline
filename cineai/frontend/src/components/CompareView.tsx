@@ -10,18 +10,23 @@ interface Props {
   baseTokens: CompareTokens | null
   judgeText: string
   judgeASide: 'rag' | 'base' | null
+  judgeShownFirst: 'rag' | 'base' | null
   streaming: boolean
 }
 
 function Column(props: {
   title: string; icon: string; subtitle: string; accent: string
   text: string; tokens: CompareTokens | null; streaming: boolean
+  letter: string | null
 }) {
-  const { title, icon, subtitle, accent, text, tokens, streaming } = props
+  const { title, icon, subtitle, accent, text, tokens, streaming, letter } = props
   return (
     <div className="cmp-col" style={{ borderTopColor: accent }}>
       <div className="cmp-col-head">
-        <span className="cmp-col-title"><span>{icon}</span> {title}</span>
+        <span className="cmp-col-title">
+          {letter && <span className="cmp-letter" style={{ background: accent }}>Answer {letter}</span>}
+          <span>{icon}</span> {title}
+        </span>
         <span className="cmp-col-sub">{subtitle}</span>
       </div>
       <div className="cmp-col-body answer-content">
@@ -40,7 +45,9 @@ function Column(props: {
   )
 }
 
-export function CompareView({ question, ragText, baseText, chunks, ragTokens, baseTokens, judgeText, judgeASide, streaming }: Props) {
+export function CompareView({ question, ragText, baseText, chunks, ragTokens, baseTokens, judgeText, judgeASide, judgeShownFirst, streaming }: Props) {
+  // Labels are normalised server-side: Answer A is ALWAYS the left (RAG) column.
+  const judging = judgeASide !== null
   return (
     <div className="compare-view">
       <div className="cmp-banner">
@@ -58,12 +65,12 @@ export function CompareView({ question, ragText, baseText, chunks, ragTokens, ba
         <Column
           title="With RAG" icon="🔍" accent="#3b82f6"
           subtitle="grounded on retrieved sources"
-          text={ragText} tokens={ragTokens} streaming={streaming}
+          text={ragText} tokens={ragTokens} streaming={streaming} letter={judging ? 'A' : null}
         />
         <Column
           title="Without RAG" icon="🧠" accent="#a855f7"
           subtitle="model's parametric knowledge only"
-          text={baseText} tokens={baseTokens} streaming={streaming}
+          text={baseText} tokens={baseTokens} streaming={streaming} letter={judging ? 'B' : null}
         />
       </div>
 
@@ -83,8 +90,13 @@ export function CompareView({ question, ragText, baseText, chunks, ragTokens, ba
           </div>
           {judgeASide !== null && (
             <div className="cmp-col-foot">
-              🔓 Reveal: Answer A = {judgeASide === 'rag' ? '🔍 With RAG' : '🧠 Without RAG'} ·
-              {' '}Answer B = {judgeASide === 'rag' ? '🧠 Without RAG' : '🔍 With RAG'}
+              🔓 Reveal: Answer A = 🔍 With RAG (left) · Answer B = 🧠 Without RAG (right)
+              {judgeShownFirst && (
+                <span className="cmp-foot-dim">
+                  {' '}— the judge saw them in random order (this time RAG was shown
+                  {judgeShownFirst === 'rag' ? ' first' : ' second'}); its labels are matched to the columns.
+                </span>
+              )}
             </div>
           )}
         </div>
