@@ -1,0 +1,18 @@
+{"id": "q-inception", "q": "Tell me about the movie Inception", "answerable": true}
+{"id": "q-police", "q": "What studio albums did The Police release?", "answerable": true}
+{"id": "q-nolan", "q": "What is Christopher Nolan's directing style?", "answerable": true}
+{"id": "q-ebert-fargo", "q": "What did Roger Ebert think of Fargo?", "answerable": true}
+{"id": "q-heist", "q": "Recommend some great bank heist movies", "answerable": true}
+{"id": "q-korean", "q": "Who are the major directors of Korean cinema?", "answerable": true}
+{"id": "q-breakingbad", "q": "Who created Breaking Bad and who are its main cast?", "answerable": true}
+{"id": "q-jazz", "q": "How did jazz develop as a genre?", "answerable": true}
+{"id": "q-zimmer", "q": "Which films has Hans Zimmer scored?", "answerable": true, "holdout": true}
+{"id": "q-70s", "q": "What were the best films of the 1970s?", "answerable": true, "holdout": true}
+{"id": "n-fake-film", "q": "Tell me about the 1987 film The Glass Lighthouse of Varn", "answerable": false, "why": "no such film; any plot/cast is a fabrication"}
+{"id": "n-ebert-after-death", "q": "What did Roger Ebert think of Oppenheimer (2023)?", "answerable": false, "why": "Ebert died in 2013; there is no review"}
+{"id": "n-fake-album", "q": "What's on The Police's 1991 reunion album Northern Echo?", "answerable": false, "why": "no such album"}
+{"id": "n-future-oscar", "q": "Which film won Best Picture at the 2031 Academy Awards?", "answerable": false, "why": "future event", "holdout": true}
+{"id": "c-grounded", "q": "Who directed Inception?", "answerable": true, "calibration": true, "expect_pass": true, "context": "TMDB: Inception (2010). crew: Christopher Nolan (Director), Emma Thomas (Producer). cast: Leonardo DiCaprio as Dom Cobb.", "answer": "**Inception** (2010) was directed by Christopher Nolan, with Leonardo DiCaprio starring as Dom Cobb."}
+{"id": "c-fabricated", "q": "Who directed Inception?", "answerable": true, "calibration": true, "expect_pass": false, "context": "TMDB: Inception (2010). crew: Christopher Nolan (Director). cast: Leonardo DiCaprio as Dom Cobb.", "answer": "**Inception** (2010) was directed by Christopher Nolan. It won the Academy Award for Best Picture and was shot entirely in Iceland over 400 days."}
+{"id": "c-honest-unknown", "q": "Tell me about the 1987 film The Glass Lighthouse of Varn", "answerable": false, "calibration": true, "expect_pass": true, "context": "TMDB: no results for 'The Glass Lighthouse of Varn'.", "answer": "I couldn't find a film called *The Glass Lighthouse of Varn* in the movie database. Check the spelling, or try a related title or director."}
+{"id": "c-confident-invention", "q": "Tell me about the 1987 film The Glass Lighthouse of Varn", "answerable": false, "calibration": true, "expect_pass": false, "context": "TMDB: no results for 'The Glass Lighthouse of Varn'.", "answer": "*The Glass Lighthouse of Varn* (1987) is a Norwegian drama directed by Lars Halvorsen about a lighthouse keeper's daughter. It won the Silver Bear at Berlin."}

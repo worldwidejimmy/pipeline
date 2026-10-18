@@ -62,3 +62,31 @@ def test_t5_doubling_fails():
 
 def test_missing_baseline_is_new_not_pass():
     assert gate({"tier": "t1", "accuracy": 1.0, "failures": []}, {})[0] == "new"
+
+
+# ── T3 judge pass rules + gate ────────────────────────────────────────────────
+from run_evals import quality_pass  # noqa: E402
+
+V = lambda g, r, c, admits=False: {"groundedness": g, "relevance": r, "completeness": c,  # noqa: E731
+                                   "admits_limits": admits, "unsupported_claims": []}
+
+
+def test_quality_answerable_needs_grounding_and_relevance():
+    assert quality_pass({"answerable": True}, V(4, 4, 3))
+    assert not quality_pass({"answerable": True}, V(3, 5, 5))     # well-written but ungrounded
+    assert not quality_pass({"answerable": True}, V(5, 3, 5))
+
+
+def test_quality_unanswerable_rewards_admitting_it():
+    assert quality_pass({"answerable": False}, V(5, 5, 5, admits=True))
+    # Confident invention fails even if the judge thought it "relevant".
+    assert not quality_pass({"answerable": False}, V(5, 5, 5, admits=False))
+    assert not quality_pass({"answerable": False}, V(2, 5, 5, admits=True))
+
+
+def test_t3_uncalibrated_judge_fails_the_run():
+    base = {"t3": {"pass_rate": 1.0, "tolerance": 0.15, "failures": []}}
+    good = {"tier": "t3", "pass_rate": 1.0, "failures": [], "judge_calibrated": True, "judge_calibration": "4/4"}
+    assert gate(good, base)[0] == "pass"
+    assert gate(good | {"judge_calibrated": False, "judge_calibration": "3/4"}, base)[0] == "fail"
+    assert gate(good | {"pass_rate": 0.8, "failures": ["a", "b", "c"]}, base)[0] == "fail"

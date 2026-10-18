@@ -22,5 +22,11 @@
     "p95_ms": 13500,
     "tokens_per_query": 5900,
     "_note": "2026-10-18, claude-haiku-5-5: p50 5.6-8.2s, p95 ~13.4s, ~5.2-5.9k tok/q, ~$0.001/q (Haiku 4.5 on the same canaries: p50 8.4s, $0.0072/q). Gate fires at >2x either value."
+  },
+  "t3": {
+    "pass_rate": 1.0,
+    "tolerance": 0.15,
+    "failures": [],
+    "_note": "2026-10-18: generator claude-haiku-5-5, judge claude-sonnet-5-5 @ medium effort. 14/14 pass (10 answerable, 4 unanswerable), groundedness 4.71/5, judge calibration 4/4. Gate: calibration must be 4/4 (else scores are untrusted) and pass rate may not drop >15 pts (~3 cases). A 100% start means this set is easy \u2014 add harder cases as real failures are seen."
   }
 }

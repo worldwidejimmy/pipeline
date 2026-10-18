@@ -9,7 +9,10 @@ Tiers (cheapest first):
   t4  canaries   — a handful of full-pipeline questions with known-good content
                    (and known-bad phrases like "couldn't find").
   t5  cost/latency — derived from the t4 runs: p50/p95 wall time, tokens/query, $.
-  nightly = t1,t2,t4 (t5 comes with t4).
+  t3  quality    — WEEKLY. LLM-as-judge on live answers: groundedness / relevance /
+                   completeness, unanswerable questions (admitting it = correct),
+                   and fixed calibration answers that check the judge itself.
+  nightly = t1,t2,t4 (t5 comes with t4). eval_nightly.sh adds t3 on Sundays.
 
 Every result records the LLM model id, because the app auto-upgrades to the newest
 model in its tier (src/llm.py) — a model change is exactly what these evals guard.
@@ -280,6 +283,137 @@ async def run_canaries(verbose: bool) -> tuple[dict, dict]:
     return t4, t5
 
 
+# ── T3 answer quality (LLM-as-judge) ───────────────────────────────────────────
+# Judge pitfalls designed around (EVALS-PLAN.md): a DIFFERENT, stronger tier judges
+# (newest Sonnet; generation is Haiku) to dodge self-preference; the rubric scores
+# dimensions separately instead of one blended number; unanswerable questions REWARD
+# admitting it; and fixed calibration answers with known verdicts check the judge —
+# an unvalidated judge is just a confident opinion. Judge model + effort are recorded.
+JUDGE_TIER = "sonnet"
+JUDGE_EFFORT = "medium"
+_JUDGE_SYSTEM = """You grade answers produced by a movie/TV/music question-answering system.
+You receive the user's QUESTION, the CONTEXT the system retrieved (database records,
+knowledge-base passages, web results), and the system's ANSWER.
+
+Score strictly against the CONTEXT, not your own knowledge:
+- groundedness (1-5): 5 = every factual claim in the answer is supported by the context;
+  1 = central claims are absent from or contradict the context. Formatting, links and
+  generic framing are not claims.
+- relevance (1-5): does it answer what was actually asked?
+- completeness (1-5): does it use what the context offers for this question? If the
+  context cannot answer the question, a clear statement of that is complete.
+- unsupported_claims: list each specific factual claim NOT supported by the context
+  (empty list if none). Be concrete — quote the claim briefly.
+- admits_limits: true if the answer clearly tells the user the information was not
+  found / is not available, where the context lacks it.
+
+If the context does not contain the answer, the CORRECT behaviour is to say so; an
+answer that fills the gap from memory or invention must lose groundedness."""
+_JUDGE_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "required": ["groundedness", "relevance", "completeness", "unsupported_claims",
+                 "admits_limits", "reason"],
+    "properties": {
+        "groundedness": {"type": "integer", "description": "1-5"},
+        "relevance": {"type": "integer", "description": "1-5"},
+        "completeness": {"type": "integer", "description": "1-5"},
+        "unsupported_claims": {"type": "array", "items": {"type": "string"}},
+        "admits_limits": {"type": "boolean"},
+        "reason": {"type": "string", "description": "one or two sentences"},
+    },
+}
+
+
+def quality_pass(case: dict, v: dict) -> bool:
+    """Pass rule per case kind. Pure — unit-tested."""
+    if not case.get("answerable", True):
+        return bool(v["admits_limits"]) and v["groundedness"] >= 4
+    return v["groundedness"] >= 4 and v["relevance"] >= 4 and v["completeness"] >= 3
+
+
+async def _answer_with_context(q: str, thread: str) -> tuple[str, str]:
+    """Run the real graph; return (final answer, the agent outputs it was built from)."""
+    from src.graph.pipeline import build_pipeline
+    state = await build_pipeline().ainvoke({"question": q, "history": []},
+                                           {"configurable": {"thread_id": thread}})
+    parts = [f"[{k}]\n{state[k]}" for k in ("tmdb_result", "rag_result", "music_result", "search_result")
+             if state.get(k)]
+    return state.get("answer", ""), "\n\n".join(parts)
+
+
+async def run_quality(verbose: bool) -> dict:
+    import anthropic
+    from src.config import get_config
+    from src.llm import _list_models, pick_newest
+
+    judge_model = (pick_newest(_list_models(), JUDGE_TIER) or {}).get("id", "claude-sonnet-5-5")
+    client = anthropic.AsyncAnthropic(api_key=get_config().anthropic_api_key)
+    cases = _load("quality.jsonl")
+    rows = []
+    for c in cases:
+        t0 = time.time()
+        try:
+            if c.get("calibration"):
+                answer, context = c["answer"], c["context"]
+            else:
+                answer, context = await _answer_with_context(c["q"], f"eval-t3-{c['id']}-{int(t0)}")
+            msg = await client.messages.create(
+                model=judge_model, max_tokens=4000, system=_JUDGE_SYSTEM,
+                output_config={"effort": JUDGE_EFFORT,
+                               "format": {"type": "json_schema", "schema": _JUDGE_SCHEMA}},
+                messages=[{"role": "user", "content":
+                           f"QUESTION:\n{c['q']}\n\nCONTEXT:\n{context[:12000] or '(nothing retrieved)'}"
+                           f"\n\nANSWER:\n{answer[:6000]}"}])
+            if msg.stop_reason == "refusal":
+                raise RuntimeError("judge refused")
+            v = json.loads(next(b.text for b in msg.content if b.type == "text"))
+            ok, err = quality_pass(c, v), None
+            judge_tok = msg.usage.input_tokens + msg.usage.output_tokens
+        except Exception as exc:
+            v, ok, err, answer, judge_tok = {}, False, str(exc)[:150], "", 0
+        row = {"id": c["id"], "q": c["q"], "kind": "calibration" if c.get("calibration")
+               else ("answerable" if c.get("answerable", True) else "unanswerable"),
+               "holdout": bool(c.get("holdout")), "ok": ok, "verdict": v, "error": err,
+               "judge_tokens": judge_tok, "answer_head": answer[:300],
+               "ms": int((time.time() - t0) * 1000)}
+        if c.get("calibration"):
+            row["judge_agrees"] = (ok == c["expect_pass"]) and not err
+        rows.append(row)
+        if verbose:
+            tag = ("✓" if row.get("judge_agrees") else "✗ JUDGE DISAGREES") if c.get("calibration") \
+                else ("✓" if ok else "✗")
+            g = f"G{v.get('groundedness','-')} R{v.get('relevance','-')} C{v.get('completeness','-')}"
+            print(f"  {tag} {c['id']:22} {row['kind']:12} {g}"
+                  + (f"  admits" if v.get("admits_limits") else "")
+                  + (f"\n      {err}" if err else "")
+                  + ("" if ok or err or c.get("calibration") else f"\n      {v.get('reason','')}"
+                     + (f"\n      unsupported: {'; '.join(v.get('unsupported_claims', [])[:3])}"
+                        if v.get('unsupported_claims') else "")))
+
+    graded = [r for r in rows if r["kind"] != "calibration" and not r["error"]]
+    mean = lambda k: round(statistics.mean(r["verdict"][k] for r in graded), 2) if graded else None  # noqa: E731
+    cal = [r for r in rows if r["kind"] == "calibration"]
+    ans = [r for r in rows if r["kind"] == "answerable"]
+    neg = [r for r in rows if r["kind"] == "unanswerable"]
+    rate = lambda rs: round(sum(r["ok"] for r in rs) / len(rs), 4) if rs else None  # noqa: E731
+    live_ok = sum(r["ok"] for r in ans + neg)
+    return {
+        "tier": "t3", "name": "quality", "at": _now(), "n": len(ans) + len(neg),
+        "judge_model": judge_model, "judge_effort": JUDGE_EFFORT,
+        "pass_rate": rate(ans + neg), "answerable_pass_rate": rate(ans),
+        "unanswerable_pass_rate": rate(neg),
+        "holdout_pass_rate": rate([r for r in ans + neg if r["holdout"]]),
+        "groundedness": mean("groundedness"), "relevance": mean("relevance"),
+        "completeness": mean("completeness"),
+        "judge_calibration": f"{sum(r['judge_agrees'] for r in cal)}/{len(cal)}",
+        "judge_calibrated": all(r["judge_agrees"] for r in cal),
+        "failures": sorted(r["id"] for r in ans + neg if not r["ok"]),
+        "headline": f"{live_ok}/{len(ans) + len(neg)} pass · grounded {mean('groundedness')}/5"
+                    f" · judge calib {sum(r['judge_agrees'] for r in cal)}/{len(cal)}",
+        "cases": rows,
+    }
+
+
 # ── Baseline gate ───────────────────────────────────────────────────────────────
 def gate(res: dict, base_all: dict) -> tuple[str, list[str]]:
     """Compare one tier's result to its baseline → ("pass"|"fail"|"new", messages).
@@ -316,6 +450,16 @@ def gate(res: dict, base_all: dict) -> tuple[str, list[str]]:
         if new:
             failed = True
             msgs.append(f"REGRESSION — canaries failing: {', '.join(new)}")
+    elif tier == "t3":
+        if not res.get("judge_calibrated"):
+            failed = True
+            msgs.append(f"JUDGE UNRELIABLE — calibration {res['judge_calibration']}: scores this run can't be trusted")
+        if res["pass_rate"] is not None and res["pass_rate"] + 1e-9 < base.get("pass_rate", 0) - base.get("tolerance", 0.15):
+            failed = True
+            msgs.append(f"REGRESSION — quality pass rate {base['pass_rate']:.0%} → {res['pass_rate']:.0%}")
+        new = sorted(set(res["failures"]) - set(base.get("failures", [])))
+        if new:
+            msgs.append(f"newly failing: {', '.join(new)}")
     elif tier == "t5":
         if base.get("p95_ms") and res.get("p95_ms") and res["p95_ms"] > base["p95_ms"] * 2:
             failed = True
@@ -349,14 +493,14 @@ def record(results: list[dict], model: dict) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--tier", default="t2", help="comma list of t1,t2,t4 (t5 rides on t4) or 'nightly'")
+    ap.add_argument("--tier", default="t2", help="comma list of t1,t2,t3,t4 (t5 rides on t4) or 'nightly'")
     ap.add_argument("--k", type=int, default=None, help="override top_k (t2 sweep)")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--no-gate", action="store_true", help="report only, never exit non-zero")
     a = ap.parse_args()
 
     tiers = {"t1", "t2", "t4"} if a.tier == "nightly" else set(a.tier.split(","))
-    unknown = tiers - {"t1", "t2", "t4", "t5"}
+    unknown = tiers - {"t1", "t2", "t3", "t4", "t5"}
     if unknown:
         print(f"unknown/unimplemented tier(s): {', '.join(sorted(unknown))} — see EVALS-PLAN.md")
         return 2
@@ -377,6 +521,10 @@ def main() -> int:
             if verbose:
                 print(f"\nT1 routing — supervisor only, model {model['model']}\n")
             out.append(await run_routing(verbose))
+        if "t3" in tiers:
+            if verbose:
+                print(f"\nT3 quality — live answers ({model['model']}) graded by an LLM judge\n")
+            out.append(await run_quality(verbose))
         if "t4" in tiers or "t5" in tiers:
             if verbose:
                 print(f"\nT4 canaries — full pipeline, model {model['model']}\n")
@@ -402,4 +550,11 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # Exit codes: 0 green · 1 a tier regressed · 2 bad args · 3 the harness itself crashed
+    # (eval_nightly.sh words the alert differently for 1 vs the rest).
+    try:
+        sys.exit(main())
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        sys.exit(3)
