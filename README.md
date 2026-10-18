@@ -1,6 +1,6 @@
 # Multi-Agent Research Pipeline
 
-> 🚀 **Live demo:** [smartmoviesearch.com](https://smartmoviesearch.com) — open access, no login. Each visitor gets a few free searches per hour (the header shows remaining searches and the day's token usage); the access password lifts the limit and unlocks an admin view. Try the **🆚 Compare RAG vs. no-RAG** toggle to see grounded vs. ungrounded answers side by side — a **blind LLM judge** then rules on which answer is stronger (it isn't told which used retrieval; the mapping is revealed after the verdict), and the AI-Pipeline panel shows the compare run's own graph, timeline, and events. Powered by **Anthropic Claude** (default tier: Haiku); the ⚙️ status button shows live service health.
+> 🚀 **Live demo:** [smartmoviesearch.com](https://smartmoviesearch.com) — open access, no login. Each visitor gets a few free searches per hour (the header shows remaining searches and the day's token usage); the access password lifts the limit and unlocks an admin view. Try the **🆚 Compare RAG vs. no-RAG** toggle to see grounded vs. ungrounded answers side by side — a **blind LLM judge** then rules on which answer is stronger (it sees the two answers in random order and isn't told which used retrieval; its labels are then matched to the columns, so Answer A is always the RAG side), and the AI-Pipeline panel shows the compare run's own graph, timeline, and events. Powered by **Anthropic Claude** — the app automatically runs the newest model of its cost tier (default: Haiku). The ⚙️ status button shows live service health **and the nightly eval results** (routing, retrieval, LLM-judged answer quality, canaries, latency).
 
 A production agentic RAG system built with **LangGraph + Milvus**, deployed as [SmartMovieSearch](https://smartmoviesearch.com) — a natural-language movie intelligence platform.
 
@@ -273,7 +273,7 @@ traced — no instrumentation code required. The LangSmith UI shows:
 
 ## Roadmap
 
-- [ ] **RAGAS evaluation** — automated retrieval quality metrics (Faithfulness, Answer Relevancy, Context Precision) against a curated test set
+- [x] **Automated evals** — routing accuracy, retrieval hit@k/MRR/content coverage, full-pipeline canaries, cost/latency, and a calibrated LLM judge (groundedness, unanswerable questions) — nightly, gated, alerting. See `cineai/EVALS-PLAN.md`.
 - [ ] **Redis semantic cache** — skip the LLM for repeated or near-identical queries
 - [ ] **Streaming tokens in Event Log** — surface token stream in the observability panel alongside the answer
 - [ ] **User-provided documents** — API endpoint to ingest uploaded files into a per-session collection

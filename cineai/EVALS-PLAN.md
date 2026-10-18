@@ -126,21 +126,15 @@ you're optimising the metric rather than the system.
 
 ---
 
-## Build order
+## Build order — all shipped (2026-10-18)
 
-1. **T2 retrieval** — free, deterministic, and it targets the failure mode most likely to
-   recur as the corpus grows.
-2. **T0 parse fixtures** — turns the worst historical bug into a permanent test.
-3. **T1 routing** — cheap, gives a single trackable accuracy number.
-4. **T4 canaries** — extend `tests/e2e.mjs`.
-5. **T3 judge** — last, because it's the most expensive and the least trustworthy without
-   the others in place.
+1. **T2 retrieval** ✅ (2026-08) · 2. **T0 parse fixtures** ✅ (2026-08) ·
+3. **T1 routing** ✅ · 4. **T4 canaries** ✅ (in-process, not via e2e — no quota) ·
+5. **T3 judge** ✅ (weekly) · **T5** ✅ (from the T4 runs). Operational detail: `HANDOFF.md` → Evals.
 
-## Open questions
-- Where should eval results live so trends are visible — a JSONL history plus a card on
-  the ops dashboard? (The dashboard already renders any `level`/`label`/`detail` rows.)
-- Do we gate merges on T1 accuracy, or just report? (Suggest: report first, gate once the
-  baseline is stable.)
-- Is stockmarket's LLM trading agent in scope later? Its verdicts are already logged as
-  `agent_events` — that's an eval set waiting to happen, and it has *ground truth*
-  (subsequent price action), which is rarer and more valuable than any judge.
+## Open questions — resolved
+- *Where do results live?* `evals/results/` (bind-mounted, gitignored): JSONL history per tier
+  + `latest.json`, shown on `/admin`, the status modal (summary), the ops email and dashboard.
+- *Gate or report?* Gate, with per-tier tolerance (T1 allows ~3 cases of noise; T4 any new
+  failure; T3 a calibration miss or a >15-pt drop; T5 a >2× jump). Regressions email the admin.
+- *stockmarket's trading agent?* Still open — it has ground truth (subsequent price action).

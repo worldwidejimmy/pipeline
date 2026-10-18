@@ -2062,3 +2062,51 @@ html, body, #root {
   background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted); cursor: pointer;
 }
 .admin-refresh:hover { color: var(--text); border-color: var(--border-lit); }
+
+/* ── Status modal: public eval summary ────────────────────────────────────── */
+.status-evals-sub { font-size: 12px; color: var(--text-muted); margin: -4px 0 10px; }
+
+/* ── /admin page ──────────────────────────────────────────────────────────── */
+.adm { max-width: 1100px; margin: 0 auto; padding: 20px 16px 60px; color: var(--text); font-family: var(--font-sans); }
+.adm-header { display: flex; align-items: center; gap: 16px; margin-bottom: 18px; }
+.adm-header h1 { font-size: 20px; margin: 0; flex: 1; }
+.adm-back { color: var(--text-muted); text-decoration: none; font-size: 13px; }
+.adm-back:hover { color: var(--text); }
+.adm-section { margin-top: 26px; }
+.adm-section h2 { font-size: 15px; font-weight: 600; margin: 0 0 12px; }
+.adm-section h2 .adm-dim { font-weight: 400; }
+.adm-dim { color: var(--text-muted); font-size: 12px; }
+.adm-sub { color: var(--text-muted); font-size: 12px; margin-bottom: 10px; }
+.adm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+.adm-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  padding: 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.adm-card--fail { border-color: var(--red); }
+.adm-card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.adm-card-title { font-weight: 600; font-size: 13px; }
+.adm-headline { font-size: 14px; font-weight: 500; }
+.adm-trend { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.adm-spark { display: block; overflow: visible; }
+.adm-spark-empty { font-size: 11px; color: var(--text-muted); font-style: italic; }
+.adm-model { font-family: var(--font-mono); font-size: 11px; }
+.adm-fail summary { cursor: pointer; font-size: 12px; color: var(--amber); }
+.adm-fail ul { margin: 6px 0 0; padding-left: 16px; font-size: 12px; }
+.adm-fail li { margin-bottom: 6px; overflow-wrap: anywhere; }
+.adm-q { color: var(--text); }
+.adm-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+.adm-tile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 12px 14px; }
+.adm-tile-val { font-size: 20px; font-weight: 600; margin: 2px 0 6px; font-variant-numeric: tabular-nums; }
+.adm-kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; font-size: 13px; margin: 0;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px; }
+.adm-kv-row { display: contents; }
+.adm-kv dt { color: var(--text-muted); }
+.adm-kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.adm-signin { max-width: 320px; margin: 60px auto; display: flex; flex-direction: column; gap: 10px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 20px; }
+.adm-signin-title { font-weight: 600; }
+.adm-signin input { padding: 9px 11px; border-radius: var(--radius); border: 1px solid var(--border);
+  background: var(--bg); color: var(--text); font-size: 14px; }
+.adm-signin button { padding: 9px; border-radius: var(--radius); border: 0; background: var(--indigo); color: #fff;
+  font-weight: 600; cursor: pointer; }
+.adm-signin button:disabled { opacity: .5; cursor: default; }
+.adm .admin-table { display: block; overflow-x: auto; }
+@media (max-width: 520px) { .adm-kv { grid-template-columns: 1fr; } .adm-kv dt { margin-top: 6px; } }

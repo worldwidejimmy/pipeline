@@ -25,7 +25,8 @@ streaming answer. The app lives under `cineai/`.
 
 ## Build / test / run
 - Run stack: `cd cineai && docker compose up -d`; inspect: `docker compose ps` / `docker compose logs -f <svc>`.
-- Tasks/tests: `cineai/Makefile` — run `make` to list targets. `make test-e2e` = Playwright browser test of the running stack (costs 1 search + tokens). `make eval-t2` = retrieval evals (free, no LLM); run after ANY chunking/TOP_K/embedding/corpus change — it gates on `cineai/evals/baseline.json` (bumping the baseline is a deliberate, reviewable commit). Full eval roadmap: `cineai/EVALS-PLAN.md`.
+- Tasks/tests: `cineai/Makefile` — run `make` to list targets. `make test-e2e` = Playwright browser test of the running stack (costs 1 search + tokens). `make eval-t2` = retrieval evals (free, no LLM); run after ANY chunking/TOP_K/embedding/corpus change — it gates on `cineai/evals/baseline.json` (bumping the baseline is a deliberate, reviewable commit). Also `make eval-t1` (routing), `make eval-t4` (canaries + cost/latency), `make eval-nightly`; these run unattended nightly via `cineai/eval_nightly.sh` (cron 04:20 UTC, emails on regression) and show on `/admin` + the ⚙️ status modal. Run `make eval-t1 eval-t4` after any prompt, routing or model change. Details: `cineai/HANDOFF.md` → Evals; design: `cineai/EVALS-PLAN.md`.
+- **Model:** `DEFAULT_MODEL_TIER` is a cost tier that auto-resolves to the newest model in it (`src/llm.py`); `MODEL_PIN` overrides. Never hardcode a model id or `temperature` at a call site — go through `get_chat()`.
 - `cineai/devops_check.py` — health/devops checks · `cineai/backup.sh` — backups.
 
 ## Gotchas

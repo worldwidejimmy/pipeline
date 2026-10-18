@@ -13,7 +13,9 @@ Endpoints:
 from __future__ import annotations
 
 import json
+import os
 import time
+from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -694,6 +696,75 @@ async def admin_blacklist(body: _BlacklistRequest, request: Request):
     else:
         raise HTTPException(status_code=400, detail="action must be add|remove")
     return {"ok": True, "blacklist": usage.admin_snapshot()["blacklist"]}
+
+
+# ── Evals + model (admin detail; public summary) ─────────────────────────────
+# Written by evals/run_evals.py (nightly via eval_nightly.sh); evals/ is bind-mounted.
+_EVALS_DIR = Path(os.getenv("EVALS_RESULTS_DIR", "/app/evals/results"))
+_TIER_ORDER = ("t1", "t2", "t3", "t4", "t5")
+
+
+def _read_json(path: Path, default):
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return default
+
+
+def _history(tier: str, limit: int = 30) -> list[dict]:
+    files = sorted(_EVALS_DIR.glob(f"{tier}_*.jsonl"))
+    if not files:
+        return []
+    rows = []
+    for line in files[0].read_text().splitlines()[-limit:]:
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            pass
+    return rows
+
+
+@app.get("/api/evals/summary")
+async def evals_summary():
+    """PUBLIC: one line per eval tier for the status modal. Explicit allow-list —
+    no case lists, failing questions or costs (those are admin-only)."""
+    latest = _read_json(_EVALS_DIR / "latest.json", {})
+    tiers = []
+    for t in _TIER_ORDER:
+        r = (latest.get("tiers") or {}).get(t)
+        if not r:
+            continue
+        headline = r.get("headline", "")
+        if t == "t5":   # latency is fine to show; $/query stays on /admin
+            headline = " · ".join(x for x in headline.split(" · ") if not x.startswith("$"))
+        tiers.append({"tier": t, "name": r.get("name"), "status": r.get("status"),
+                      "headline": headline, "at": r.get("at"), "model": r.get("model")})
+    return {"updated": latest.get("updated"), "model": latest.get("model"), "tiers": tiers}
+
+
+@app.get("/api/admin/evals")
+async def admin_evals(request: Request):
+    """Everything the admin page shows for evals: latest per tier, trend history,
+    and the newest run's per-case detail (incl. failures)."""
+    _require_admin(request)
+    latest = _read_json(_EVALS_DIR / "latest.json", {})
+    return {
+        "latest": latest,
+        "history": {t: _history(t) for t in _TIER_ORDER},
+        "cases": {t: _read_json(_EVALS_DIR / f"{t}_last_cases.json", []) for t in _TIER_ORDER},
+    }
+
+
+@app.get("/api/admin/model")
+async def admin_model(request: Request):
+    """Which model is live and why (auto newest-in-tier, MODEL_PIN, or fallback)."""
+    _require_admin(request)
+    from src.llm import resolve
+    st = resolve()
+    return {k: st.get(k) for k in ("tier", "model", "source", "newest_in_tier", "resolved_at", "error")} | {
+        "thinking_types": sorted(k for k, v in (((st.get("caps") or {}).get("thinking") or {})
+                                                .get("types") or {}).items() if v.get("supported")),
+    }
 
 
 @app.get("/api/health")

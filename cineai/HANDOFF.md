@@ -561,18 +561,49 @@ The app is running live on the OVH VPS (behind Cloudflare — direct IP not list
 | `frontend/src/App.tsx` | Change layout, theme toggle, add new UI features |
 | `backend/docs/` | Add more movie knowledge for RAG |
 
-## Evals (added 2026-08)
+## Evals (added 2026-08, automated 2026-10)
 
-`EVALS-PLAN.md` = the roadmap (5 tiers, cheapest first). Implemented so far:
-- **T0 parse/contract** — `evals/fixtures/llm_outputs.jsonl` replayed through the real
-  `parse_llm_json` + supervisor route normalization in `make test-unit` (free, every
-  commit). Exists because ```json-fenced replies silently broke TMDB lookups for weeks.
-- **T2 retrieval** — `make eval-t2`: 20 golden cases, hit@k/MRR **and content coverage**
-  (hit@k alone passed during the real Police outage — the doc surfaced, the album chunks
-  didn't). Free: embeddings only, calls `retrieve()` directly so it never touches the
-  30/day cap. Gates on `evals/baseline.json`; run it after any chunking/TOP_K/embedding/
-  corpus change. Baseline bumps are deliberate commits with the reasoning in `_note`.
+`EVALS-PLAN.md` = the design (why each tier exists); `PLATFORM-PLAN.md` = the 2026-10
+build. All tiers run from `evals/run_evals.py` **inside the backend container** (it has
+Milvus, the keys and `src/`), in-process, so they never spend the public per-IP quota or
+the 30/day cap. Every result records the model id.
 
-Track record: the T2 eval rejected the first chunking rewrite (per-### sections, 40%
-coverage + a new MISS) and validated the second (hierarchical largest-fitting-section,
-100% coverage, MRR trade accepted). Details in the git log for `backend/scripts/ingest.py`.
+| Tier | What | Cost | Make target |
+|---|---|---|---|
+| T0 | parse/contract fixtures, judge-label swap, model-param mapping, the eval gates themselves | $0 | `make test-unit` |
+| T1 | 48 routing questions → expected route (+acceptable alternates, ~20% holdout) | <$0.01 | `make eval-t1` |
+| T2 | 20 retrieval cases: hit@k, MRR, **content coverage** | ~$0 | `make eval-t2` |
+| T4 | 6 full-pipeline canaries: must-contain facts, must-not-say "couldn't find" | ~$0.01 | `make eval-t4` |
+| T5 | p50/p95 latency, tokens/query, $/query — from the T4 runs | $0 | (with T4) |
+| T3 | weekly LLM judge (newest Sonnet) on 14 live answers incl. 4 unanswerable, + 4 calibration answers that check the judge | ~$0.2 | `--tier t3` |
+
+- **Unattended:** `eval_nightly.sh`, cron **04:20 UTC** (before the 04:50 ops digest) —
+  T1/T2/T4/T5 nightly, +T3 on Sundays. Exit 1 = regression, 3 = harness crashed; either
+  **emails the admin** via `send_email.py` → server-management `notify-admin.sh`.
+- **Results:** `evals/` is bind-mounted into the backend; `evals/results/` (gitignored)
+  holds `<tier>_*.jsonl` history, `<tier>_last_cases.json` and `latest.json`.
+- **Where you see them:** `/admin` (full detail, failing cases, trends), the ⚙️ status
+  modal (public one-line summary — `GET /api/evals/summary`, explicit allow-list, no costs
+  or case lists), the daily ops email and the box dashboard (server-management reads
+  `latest.json` via the registry's `prod.evals`).
+- **Gates:** `evals/baseline.json`, per tier, each with a `_note`. Bumping a baseline is a
+  deliberate, reviewable commit — never auto-written. T1 tolerates ~3 cases of noise:
+  new-generation models can't run at temperature 0.
+- **Compare two models on the same evals:**
+  `docker compose exec -T -e MODEL_PIN=claude-haiku-4-5-20251001 backend python3 /app/evals/run_evals.py --tier t4 --no-gate`
+  (careful: this run's results also land in `latest.json`; re-run the nightly after).
+
+Track record — bugs the evals caught that tests didn't:
+- T2 rejected the first chunking rewrite and validated the second (Police albums: 20% → 100% coverage).
+- T4, day one: film answers never named the director (TMDB payload truncated before the crew);
+  MusicBrainz 503s (1 req/s) turned whole answers into errors.
+- Running them also found `tests/e2e.mjs` hadn't parsed since compare mode shipped.
+
+## Model selection (added 2026-10)
+
+`DEFAULT_MODEL_TIER` (haiku|sonnet|opus) is a **cost tier**; `src/llm.py` resolves it to
+the **newest model in that family** via the Models API (startup + every 24h, last-known-good
+fallback). `MODEL_PIN=<id>` overrides — use it if a new model regresses the evals, then
+recreate the backend. Request params (thinking off where allowed, no `temperature` on the
+new generation) come from the model's advertised capabilities. `/admin` shows the live
+model, why it was chosen, and whether a newer one exists.

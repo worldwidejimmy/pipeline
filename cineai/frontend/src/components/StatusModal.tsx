@@ -45,12 +45,26 @@ function KeyRow({ label, present }: { label: string; present: boolean }) {
   )
 }
 
+interface EvalTier { tier: string; name: string; status: string; headline: string; at: string; model: string }
+interface EvalSummary { updated?: string; model?: string; tiers: EvalTier[] }
+
+const TIER_LABEL: Record<string, string> = {
+  t1: 'Routing', t2: 'Retrieval', t3: 'Answer quality (LLM judge)', t4: 'Canary questions', t5: 'Latency',
+}
+
+function hoursAgo(iso?: string): string {
+  if (!iso) return ''
+  const h = (Date.now() - Date.parse(iso)) / 3.6e6
+  return h < 1 ? 'under 1h ago' : h < 48 ? `${Math.round(h)}h ago` : `${Math.round(h / 24)}d ago`
+}
+
 interface Props { onClose: () => void }
 
 export function StatusModal({ onClose }: Props) {
   const [data, setData] = useState<StatusData | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshed, setRefreshed] = useState<Date | null>(null)
+  const [evals, setEvals] = useState<EvalSummary | null>(null)
 
   const load = () => {
     setLoading(true)
@@ -60,7 +74,10 @@ export function StatusModal({ onClose }: Props) {
       .catch(() => setLoading(false))
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    apiFetch('/api/evals/summary').then(r => r.json()).then(setEvals).catch(() => {})
+  }, [])
 
   const handleBackdrop = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) onClose()
@@ -157,6 +174,29 @@ export function StatusModal({ onClose }: Props) {
                 </div>
 
               </div>
+
+              {/* Automated evals — public summary only (details live on /admin) */}
+              {evals && evals.tiers.length > 0 && (
+                <>
+                  <div className="status-section-label" style={{ marginTop: 24 }}>Quality checks</div>
+                  <div className="status-evals-sub">
+                    The agents are evaluated automatically every night ({evals.model}, {hoursAgo(evals.updated)}).
+                  </div>
+                  <div className="status-rows">
+                    {evals.tiers.map(t => (
+                      <div key={t.tier} className="status-row">
+                        <StatusDot status={t.status === 'pass' ? 'ok' : t.status === 'fail' ? 'error' : 'loading'} />
+                        <div className="status-row-info">
+                          <span className="status-row-name">{TIER_LABEL[t.tier] ?? t.name}</span>
+                          <span className="status-row-detail">{t.headline} · {hoursAgo(t.at)}</span>
+                        </div>
+                        <StatusBadge status={t.status === 'pass' ? 'ok' : t.status === 'fail' ? 'error' : 'loading'}
+                          text={t.status === 'pass' ? '✓ pass' : t.status === 'fail' ? '✕ regression' : 'new'} />
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
 
               {/* API Keys */}
               <div className="status-section-label" style={{ marginTop: 24 }}>API Keys</div>

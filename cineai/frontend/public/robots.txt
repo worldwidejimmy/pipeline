@@ -1,5 +1,6 @@
 # SmartMovieSearch — https://smartmoviesearch.com
 User-agent: *
 Allow: /
+Disallow: /admin
 
 Sitemap: https://smartmoviesearch.com/sitemap.xml

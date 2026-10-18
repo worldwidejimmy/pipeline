@@ -1,6 +1,7 @@
 # Platform plan — automated evals, admin page, model auto-upgrade, compare fixes
 
-Status: **proposed** (2026-10-18). Builds on `EVALS-PLAN.md` (T0 + T2 shipped).
+Status: **shipped** 2026-10-18 (all six build steps). Builds on `EVALS-PLAN.md`.
+Operational detail now lives in `HANDOFF.md` → Evals / Model selection; this file is the design record.
 Goal: practise AI-platform-engineering properly. The agents run unattended, so they need
 continuous, automated evidence that they still work. A human should look only when that
 evidence says something changed.
