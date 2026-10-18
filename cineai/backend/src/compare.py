@@ -26,7 +26,7 @@ from typing import AsyncIterator
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from src.judge_labels import LabelNormaliser
-from src.llm import get_chat, model_id
+from src.llm import get_chat, model_id, text_of
 from src.tools.milvus_retriever import retrieve
 from src import usage
 
@@ -129,7 +129,7 @@ async def compare_stream(question: str, ip: str | None = None) -> AsyncIterator[
         try:
             async for chunk in _llm().astream(messages):
                 full = chunk if full is None else full + chunk
-                content = chunk.content if isinstance(getattr(chunk, "content", None), str) else ""
+                content = text_of(getattr(chunk, "content", None))
                 if content:
                     answers[side] += content
                     await queue.put(_sse("compare_token", {"side": side, "content": content}))
@@ -189,7 +189,7 @@ async def compare_stream(question: str, ip: str | None = None) -> AsyncIterator[
         try:
             async for chunk in _llm(max_tokens=400).astream(judge_messages):
                 full = chunk if full is None else full + chunk
-                content = chunk.content if isinstance(getattr(chunk, "content", None), str) else ""
+                content = text_of(getattr(chunk, "content", None))
                 out = relabel.feed(content) if content else ""
                 if out:
                     yield _sse("judge_token", {"content": out})

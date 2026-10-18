@@ -14,6 +14,8 @@ class Config:
     anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
     # Server-wide model tier: haiku | sonnet | opus (see src/llm.py)
     model_tier: str = os.getenv("DEFAULT_MODEL_TIER", "haiku")
+    # Optional exact model id; overrides "newest in tier" auto-resolution.
+    model_pin: str = os.getenv("MODEL_PIN", "")
 
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
 

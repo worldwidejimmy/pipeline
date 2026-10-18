@@ -5,7 +5,7 @@ from current entertainment news and reviews.
 from __future__ import annotations
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from src.llm import get_chat
+from src.llm import get_chat, text_of
 
 from src.config import get_config
 from src.tools.web_search import web_search
@@ -49,6 +49,6 @@ async def search_agent_node(state: dict) -> dict:
     ])
 
     return {
-        "search_result": response.content,
+        "search_result": text_of(response.content),
         "_search_results": search_data["results"],
     }

@@ -24,6 +24,7 @@ from pydantic import BaseModel
 from src.graph.pipeline import build_pipeline, CineState, _get_memory
 from src.tools import tmdb_client
 from src import usage
+from src.llm import text_of
 from src.compare import compare_stream
 
 app = FastAPI(title="SmartMovieSearch", version="2.0.0")
@@ -204,7 +205,7 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
                 chunk = data.get("chunk")
                 if chunk is None:
                     continue
-                content = chunk.content if isinstance(getattr(chunk, "content", None), str) else ""
+                content = text_of(getattr(chunk, "content", None))
                 if content:
                     yield _sse("token", {
                         "content":  content,
@@ -466,6 +467,9 @@ async def service_status():
             results["anthropic"] = {"status": "auth_error", "model": mid}
         else:
             results["anthropic"] = {"status": "error", "detail": raw[:120]}
+    from src.llm import resolve
+    # "auto" = newest model in the configured tier; "pinned" = MODEL_PIN; "fallback" = Models API unreachable
+    results["anthropic"]["model_source"] = resolve()["source"]
 
     # ── TMDB ────────────────────────────────────────────────────────────
     try:

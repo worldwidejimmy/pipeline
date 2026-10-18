@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from src.llm import get_chat
+from src.llm import get_chat, text_of
 
 from src.config import get_config
 
@@ -121,7 +121,7 @@ async def supervisor_route_node(state: dict) -> dict:
         HumanMessage(content=question),
     ])
 
-    raw = response.content.strip().lower()
+    raw = text_of(response.content).strip().lower()
     valid = {"tmdb", "rag", "search", "music", "tmdb+rag", "tmdb+search", "tmdb+music",
              "music+search", "rag+search", "all"}
     routing = raw if raw in valid else None

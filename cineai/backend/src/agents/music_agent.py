@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from src.llm import get_chat, parse_llm_json
+from src.llm import get_chat, parse_llm_json, text_of
 
 from src.config import get_config
 from src.tools import musicbrainz_client
@@ -75,9 +75,9 @@ async def music_agent_node(state: dict) -> dict:
         HumanMessage(content=question),
     ])
     try:
-        intent = parse_llm_json(intent_resp.content)
+        intent = parse_llm_json(text_of(intent_resp.content))
     except Exception:
-        print(f"[music_agent] intent extraction unparseable, falling back to raw question: {intent_resp.content[:120]!r}")
+        print(f"[music_agent] intent extraction unparseable, falling back to raw question: {text_of(intent_resp.content)[:120]!r}")
         intent = {"search_type": "artist", "artist": question, "album": None}
 
     search_type = intent.get("search_type", "artist")
@@ -118,6 +118,6 @@ async def music_agent_node(state: dict) -> dict:
     ])
 
     return {
-        "music_result": answer_resp.content,
+        "music_result": text_of(answer_resp.content),
         "_music_raw":   music_data,
     }

@@ -5,7 +5,7 @@ and generates a grounded answer.
 from __future__ import annotations
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from src.llm import get_chat
+from src.llm import get_chat, text_of
 
 from src.config import get_config
 from src.tools.milvus_retriever import retrieve
@@ -46,6 +46,6 @@ async def rag_agent_node(state: dict) -> dict:
     ])
 
     return {
-        "rag_result": response.content,
+        "rag_result": text_of(response.content),
         "_rag_chunks": retrieval["chunks"],
     }

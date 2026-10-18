@@ -1,0 +1,213 @@
+{
+ "_note": "Real GET /v1/models output captured 2026-10-18 (thinking caps only), replayed by tests/test_model_resolution.py",
+ "models": [
+  {
+   "id": "claude-haiku-5-5",
+   "created_at": "2026-10-07 18:00:00+00:00",
+   "capabilities": {
+    "thinking": {
+     "supported": true,
+     "types": {
+      "adaptive": {
+       "supported": true
+      },
+      "enabled": {
+       "supported": false
+      },
+      "disabled": {
+       "supported": true
+      },
+      "between_tools": {
+       "supported": false
+      }
+     }
+    }
+   }
+  },
+  {
+   "id": "claude-sonnet-5-5",
+   "created_at": "2026-09-28 00:00:00+00:00",
+   "capabilities": {
+    "thinking": {
+     "supported": true,
+     "types": {
+      "adaptive": {
+       "supported": true
+      },
+      "enabled": {
+       "supported": false
+      },
+      "disabled": {
+       "supported": false
+      },
+      "between_tools": {
+       "supported": true
+      }
+     }
+    }
+   }
+  },
+  {
+   "id": "claude-opus-5-5",
+   "created_at": "2026-09-21 16:24:00+00:00",
+   "capabilities": {
+    "thinking": {
+     "supported": true,
+     "types": {
+      "adaptive": {
+       "supported": true
+      },
+      "enabled": {
+       "supported": false
+      },
+      "disabled": {
+       "supported": false
+      },
+      "between_tools": {
+       "supported": false
+      }
+     }
+    }
+   }
+  },
+  {
+   "id": "claude-fable-5-1",
+   "created_at": "2026-08-28 00:00:00+00:00"
+  },
+  {
+   "id": "claude-opus-5",
+   "created_at": "2026-07-24 00:00:00+00:00",
+   "capabilities": {
+    "thinking": {
+     "supported": true,
+     "types": {
+      "adaptive": {
+       "supported": true
+      },
+      "enabled": {
+       "supported": false
+      },
+      "disabled": {
+       "supported": true
+      },
+      "between_tools": {
+       "supported": false
+      }
+     }
+    }
+   }
+  },
+  {
+   "id": "claude-sonnet-5",
+   "created_at": "2026-06-29 00:00:00+00:00",
+   "capabilities": {
+    "thinking": {
+     "supported": true,
+     "types": {
+      "adaptive": {
+       "supported": true
+      },
+      "enabled": {
+       "supported": false
+      },
+      "disabled": {
+       "supported": true
+      },
+      "between_tools": {
+       "supported": false
+      }
+     }
+    }
+   }
+  },
+  {
+   "id": "claude-fable-5",
+   "created_at": "2026-06-07 00:00:00+00:00"
+  },
+  {
+   "id": "claude-opus-4-8",
+   "created_at": "2026-05-28 00:00:00+00:00",
+   "capabilities": {
+    "thinking": {
+     "supported": true,
+     "types": {
+      "adaptive": {
+       "supported": true
+      },
+      "enabled": {
+       "supported": false
+      },
+      "disabled": {
+       "supported": true
+      },
+      "between_tools": {
+       "supported": false
+      }
+     }
+    }
+   }
+  },
+  {
+   "id": "claude-opus-4-7",
+   "created_at": "2026-04-14 00:00:00+00:00"
+  },
+  {
+   "id": "claude-sonnet-4-6",
+   "created_at": "2026-02-17 00:00:00+00:00",
+   "capabilities": {
+    "thinking": {
+     "supported": true,
+     "types": {
+      "adaptive": {
+       "supported": true
+      },
+      "enabled": {
+       "supported": true
+      },
+      "disabled": {
+       "supported": true
+      },
+      "between_tools": {
+       "supported": false
+      }
+     }
+    }
+   }
+  },
+  {
+   "id": "claude-opus-4-6",
+   "created_at": "2026-02-04 00:00:00+00:00"
+  },
+  {
+   "id": "claude-opus-4-5-20251101",
+   "created_at": "2025-11-24 00:00:00+00:00"
+  },
+  {
+   "id": "claude-haiku-4-5-20251001",
+   "created_at": "2025-10-15 00:00:00+00:00",
+   "capabilities": {
+    "thinking": {
+     "supported": true,
+     "types": {
+      "adaptive": {
+       "supported": false
+      },
+      "enabled": {
+       "supported": true
+      },
+      "disabled": {
+       "supported": true
+      },
+      "between_tools": {
+       "supported": false
+      }
+     }
+    }
+   }
+  },
+  {
+   "id": "claude-sonnet-4-5-20250929",
+   "created_at": "2025-09-29 00:00:00+00:00"
+  }
+ ]
+}

@@ -5,7 +5,7 @@ coherent answer. Maintains conversation history in state.
 from __future__ import annotations
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from src.llm import get_chat
+from src.llm import get_chat, text_of
 
 from src.config import get_config
 
@@ -75,6 +75,6 @@ async def synthesise_node(state: dict) -> dict:
         HumanMessage(content=f"Question: {question}"),
     ])
 
-    answer = response.content
+    answer = text_of(response.content)
     new_history = history + [{"q": question, "a": answer}]
     return {"answer": answer, "history": new_history[-10:]}
