@@ -3,7 +3,7 @@
 Nightly DevOps health check for smartmoviesearch — emails a report to the admin.
 
 Checks: container health/restarts, app HTTP health, disk, memory, reclaimable Docker
-space, backup freshness, origin-cert expiry, and the last nightly-ingest result.
+space, backup freshness, origin-cert expiry, the last nightly-ingest result and eval status.
 Emails via send_email.py (which no-ops if SMTP isn't configured). Run: ./devops_check.py
 """
 import glob
@@ -158,6 +158,25 @@ if logs:
         issues.append(f"ingest hasn't run in {age_h:.0f}h")
 else:
     line("\nNightly ingest: no logs yet")
+
+# ── Evals (eval_nightly.sh, 04:20 UTC; t3 weekly) ─────────────────────────────
+try:
+    ev = json.loads((HERE / "evals" / "results" / "latest.json").read_text())
+    line(f"\nEvals (model {ev.get('model', '?')}, {ev.get('model_source', '?')}):")
+    for key, t in sorted(ev.get("tiers", {}).items()):
+        age_h = (time.time() - datetime.fromisoformat(t["at"]).timestamp()) / 3600
+        limit = 8 * 24 if key == "t3" else 36     # t3 is the weekly judge
+        mark = "✓" if t.get("status") == "pass" else "🔴"
+        line(f"  {mark} {key} {t.get('name', ''):15} {t.get('headline', '')}  ({age_h:.0f}h ago)")
+        if t.get("status") != "pass":
+            issues.append(f"eval {key} {t.get('status')}")
+        if age_h > limit:
+            issues.append(f"eval {key} stale ({age_h:.0f}h)")
+    line("  details: https://smartmoviesearch.com/admin")
+except FileNotFoundError:
+    line("\nEvals: no results yet"); issues.append("evals never ran")
+except Exception as e:
+    line(f"\nEvals: unreadable ({str(e)[:60]})"); issues.append("evals summary unreadable")
 
 # ── Verdict + email ───────────────────────────────────────────────────────────
 line("\n" + "=" * 60)
