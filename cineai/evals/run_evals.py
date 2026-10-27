@@ -58,6 +58,23 @@ PRICES = {
 # Phrases that mean a known-answerable canary failed — the fenced-JSON weeks read like this.
 FAIL_PHRASES = ["couldn't find", "could not find", "wasn't able to find", "unable to find",
                 "don't have information", "no information about"]
+# A refusal shows up in the answer's opening ("I couldn't find Inception…"). The same
+# phrase deeper in a fact-complete answer is a hedge about a side detail ("I don't have
+# information about the members") — recorded as a note, not a failure. 2026-10-27 the
+# cars canary failed nightly on exactly that while listing every album correctly.
+LEAD_CHARS = 200
+
+
+def _lead(answer: str) -> str:
+    """The answer's opening, ignoring markdown headings."""
+    body = "\n".join(l for l in answer.splitlines() if not l.lstrip().startswith("#"))
+    return body.strip()[:LEAD_CHARS].lower()
+
+
+def canary_notes(answer: str) -> list[str]:
+    """Refusal phrases AFTER the opening: worth seeing on /admin, not a failure."""
+    lead, low = _lead(answer), answer.lower()
+    return [f'hedges "{p}"' for p in FAIL_PHRASES if p in low and p not in lead]
 
 
 def _now() -> str:
@@ -213,8 +230,9 @@ def check_canary(c: dict, answer: str) -> list[str]:
     problems = []
     if not answer.strip():
         return ["empty answer"]
+    lead = _lead(answer)
     for p in FAIL_PHRASES:
-        if p in low:
+        if p in lead:
             problems.append(f'says "{p}"')
     for key, min_key in (("contain_any", "min_any"), ("contain_any_2", "min_any_2")):
         want = c.get(key) or []
@@ -251,10 +269,13 @@ async def run_canaries(verbose: bool) -> tuple[dict, dict]:
         answer = "".join(final) or "".join(any_tok)
         problems = ([err] if err else []) + check_canary(c, answer)
         rows.append({"id": c["id"], "q": c["q"], "ok": not problems, "problems": problems,
+                     "notes": canary_notes(answer),
                      "route": route, "ms": done.get("total_latency_ms") or int((time.time() - t0) * 1000),
                      "tokens_in": done.get("total_prompt_tokens", 0),
                      "tokens_out": done.get("total_completion_tokens", 0),
-                     "answer_head": answer[:300]})
+                     "answer_head": answer[:300],
+                     # full text on failure so the cause is visible after the fact
+                     **({"answer": answer[:6000]} if problems else {})})
         if verbose:
             r = rows[-1]
             print(f"  {'✓' if r['ok'] else '✗'} {c['id']:16} {r['route'] or '?':12} "

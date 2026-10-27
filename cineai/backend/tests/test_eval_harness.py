@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "evals"))
 
-from run_evals import check_canary, gate  # noqa: E402
+from run_evals import canary_notes, check_canary, gate  # noqa: E402
 
 INCEPTION = {"contain_any": ["DiCaprio", "Nolan"], "min_any": 2}
 
@@ -22,6 +22,20 @@ def test_canary_fail_phrase_even_if_facts_present():
     # The fenced-JSON weeks: confident, well-formed, and wrong.
     out = check_canary(INCEPTION, "I couldn't find Inception. Nolan? DiCaprio?")
     assert out == ['says "couldn\'t find"']
+
+
+def test_canary_fail_phrase_after_heading_still_fails():
+    out = check_canary(INCEPTION, "## Inception\n\nI couldn't find Inception. Nolan? DiCaprio?")
+    assert out == ['says "couldn\'t find"']
+
+
+def test_canary_late_hedge_is_a_note_not_a_failure():
+    # The 2026-10-27 cars flake: every album listed, then a hedge about a side detail.
+    cars = {"contain_any": ["Candy-O", "Panorama"], "min_any": 2}
+    ans = ("## The Cars\n\nThe Cars were an American rock band formed in 1976. " + "x " * 120
+           + "\nAlbums: Candy-O (1979), Panorama (1980).\nI don't have information about the members.")
+    assert check_canary(cars, ans) == []
+    assert canary_notes(ans) == ['hedges "don\'t have information"']
 
 
 def test_canary_empty():

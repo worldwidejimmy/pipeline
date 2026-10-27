@@ -110,7 +110,9 @@ async def music_agent_node(state: dict) -> dict:
 
     # Step 3: Generate grounded answer
     llm_answer = _get_llm(max_tokens=1024)
-    music_text = json.dumps(music_data, indent=2, default=str)
+    # Compact JSON: indent=2 made a typical artist ~7.4k chars, so the [:6000] cut
+    # dropped the tail of the release list mid-entry (found by the T4 cars canary).
+    music_text = json.dumps(music_data, separators=(",", ":"), default=str)
 
     answer_resp = await llm_answer.ainvoke([
         SystemMessage(content=_ANSWER_SYSTEM.format(music_data=music_text[:6000])),
