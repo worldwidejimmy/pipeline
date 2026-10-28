@@ -3,11 +3,12 @@
 Ping healthchecks.io for a scheduled job, so all-green runs don't need an email.
 
     from healthcheck import ping
-    if not ping("smartmovie_search_devops", ok=not issues, body=report):
+    if not ping("smartmovie_search_devops", ok=not issues, body="; ".join(issues)):
         send the email                     # red, OR the ping didn't get through
 
-Pings the check's URL (success) or <url>/fail, with the report as the POST body so
-it shows in the check's event log. A job that never runs (cron broken, box down)
+Pings the check's URL (success) or <url>/fail. The POST body lands in healthchecks.io's
+event log, a THIRD PARTY, so callers send at most a one-line issue summary (never the
+report: it names paths, backups, disk layout); the full report travels only by email. A job that never runs (cron broken, box down)
 sends no ping, and healthchecks.io alerts on that.
 
 URLs live in ~/.config/healthchecks.env (chmod 600, outside every repo; this repo is

@@ -205,6 +205,8 @@ if "--no-email" not in sys.argv:
     # Green → a healthchecks.io ping, no email. Red → email as always + a /fail ping.
     # A green run whose ping didn't get through still emails, so it's never lost.
     from healthcheck import ping
-    pinged = ping("smartmovie_search_devops", ok=not issues, body=report)
+    # Third party: send only the one-line issue summary (fixed strings, no paths/IPs/
+    # hostnames/error text), never the report itself; the full report goes by email.
+    pinged = ping("smartmovie_search_devops", ok=not issues, body="; ".join(issues))
     if issues or not pinged:
         subprocess.run([str(HERE / "send_email.py"), subject], input=report, text=True)
