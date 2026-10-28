@@ -146,6 +146,8 @@ if "--no-email" not in sys.argv:
     import subprocess
     from healthcheck import ping
     # Issue summary only (see devops_check.py), never the full report.
-    pinged = ping("smartmovie_search_seo", ok=not issues, body="; ".join(issues))
+    hc_body = (f"{len(issues)} issue(s): " + "; ".join(issues)
+               + f"\nfull report on the server: cineai/backend/data/ops-logs/seo-{stamp}.log") if issues else ""
+    pinged = ping("smartmovie_search_seo", ok=not issues, body=hc_body)
     if issues or not pinged:
         subprocess.run([str(HERE / "send_email.py"), subject], input=report_txt, text=True)
