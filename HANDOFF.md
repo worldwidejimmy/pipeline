@@ -34,8 +34,9 @@ This document is for anyone taking over the **movie, TV, and music** multi-agent
 | `cineai/backend/data/` | **Gitignored** generated files: `ebert_urls.json`, `ebert_reviews.jsonl`, `scrape.log`, `nightly-logs/`. **Volume-mounted** into the backend container (so ingest/cron can read it). |
 | `cineai/nightly_update.sh` | **Nightly RAG refresh** — scrape (capped `--limit 800`) + ingest new reviews; emails a summary when it adds any. |
 | `cineai/backup.sh` | **Nightly backup** — tars `.env` + `data/` to `~/backups/smartmoviesearch` (keeps 14). Milvus is derived; restore via `ingest_ebert.py`. |
-| `cineai/devops_check.py` | **Nightly DevOps health check** — containers/app/disk/mem/backup/cert/ingest → emails 🟢/🔴 report. |
-| `cineai/seo_check.py` | **Daily SEO audit** — title/description/OG/Twitter/canonical/JSON-LD + real robots.txt & sitemap.xml → emails report. |
+| `cineai/devops_check.py` | **Nightly DevOps health check** — containers/app/disk/mem/backup/cert/ingest/evals → pings healthchecks.io (`smartmovie_search_devops`); emails only when 🔴 (or the ping fails). |
+| `cineai/seo_check.py` | **Daily SEO audit** — title/description/OG/Twitter/canonical/JSON-LD + real robots.txt & sitemap.xml → pings healthchecks.io (`smartmovie_search_seo`); emails only on issues. |
+| `cineai/healthcheck.py` | healthchecks.io pinger (ok → ping, red → `/fail`). Key in `~/.config/healthchecks.env` (`HC_PING_KEY=`, chmod 600, never in the repo). No key / ping fails → the caller emails instead. |
 | `cineai/send_email.py` | Shared SMTP notifier (reads `SMTP_*`/`ADMIN_EMAIL` from `backend/.env`; no-ops if unset). |
 | `cineai/frontend/src/components/RoutingRulesModal.tsx` | **Rules** UI (loads `/api/rules`) |
 | `cineai/frontend/src/components/{UsageBadge,CompareView,PasswordGate}.tsx` | Token meter + free-quota chip; RAG compare two-column view; optional sign-in modal |
@@ -80,8 +81,8 @@ Three cron jobs run nightly in the `ubuntu` crontab (**UTC**, quiet US hours; th
 CRON_TZ=UTC
 0  8 * * *  cineai/nightly_update.sh   # RAG refresh: scrape --refresh-recent 1 --limit 800, then ingest_ebert.py --skip-existing
 0  9 * * *  cineai/backup.sh           # tar .env + data/ → ~/backups/smartmoviesearch (keep 14)
-15 9 * * *  cineai/devops_check.py      # DevOps health report email
-20 9 * * *  cineai/seo_check.py          # daily SEO audit email
+15 9 * * *  cineai/devops_check.py      # DevOps health → healthchecks.io; email on 🔴
+20 9 * * *  cineai/seo_check.py          # SEO audit → healthchecks.io; email on issues
 ```
 
 Reports also persist for triage under `backend/data/ops-logs/` (`devops-*.log`,

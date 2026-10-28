@@ -4,7 +4,8 @@ Nightly DevOps health check for smartmoviesearch — emails a report to the admi
 
 Checks: container health/restarts, app HTTP health, disk, memory, reclaimable Docker
 space, backup freshness, origin-cert expiry, the last nightly-ingest result and eval status.
-Emails via send_email.py (which no-ops if SMTP isn't configured). Run: ./devops_check.py
+Pings healthchecks.io (slug smartmovie_search_devops) every run; emails via
+send_email.py only when something is wrong (or the ping fails). Run: ./devops_check.py
 """
 import glob
 import json
@@ -201,4 +202,9 @@ for old_log in sorted(OPS.glob("devops-*.log"))[:-60]:   # keep last 60 reports
     old_log.unlink(missing_ok=True)
 
 if "--no-email" not in sys.argv:
-    subprocess.run([str(HERE / "send_email.py"), subject], input=report, text=True)
+    # Green → a healthchecks.io ping, no email. Red → email as always + a /fail ping.
+    # A green run whose ping didn't get through still emails, so it's never lost.
+    from healthcheck import ping
+    pinged = ping("smartmovie_search_devops", ok=not issues, body=report)
+    if issues or not pinged:
+        subprocess.run([str(HERE / "send_email.py"), subject], input=report, text=True)

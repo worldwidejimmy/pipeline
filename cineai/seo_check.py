@@ -5,7 +5,8 @@ Daily technical-SEO audit for smartmoviesearch — emails a report to the admin.
 Fetches the live site (through Cloudflare) and checks the on-page/indexability
 signals crawlers care about: HTTP status, title/description (+ lengths), Open Graph
 + Twitter cards, canonical, JSON-LD, and whether robots.txt / sitemap.xml are REAL
-(not the SPA fallback). Emails via send_email.py; persists to backend/data/ops-logs.
+(not the SPA fallback). Pings healthchecks.io (slug smartmovie_search_seo); emails via
+send_email.py only on issues or a failed ping; persists to backend/data/ops-logs.
 Run: ./seo_check.py [--no-email]
 """
 import glob
@@ -140,5 +141,10 @@ for old in sorted(OPS.glob("seo-*.log"))[:-60]:
     old.unlink(missing_ok=True)
 
 if "--no-email" not in sys.argv:
+    # Same policy as devops_check.py: green (warnings included) → healthchecks.io ping
+    # only; issues → email + /fail ping; ping failure → email anyway.
     import subprocess
-    subprocess.run([str(HERE / "send_email.py"), subject], input=report_txt, text=True)
+    from healthcheck import ping
+    pinged = ping("smartmovie_search_seo", ok=not issues, body=report_txt)
+    if issues or not pinged:
+        subprocess.run([str(HERE / "send_email.py"), subject], input=report_txt, text=True)
