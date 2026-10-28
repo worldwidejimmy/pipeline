@@ -36,7 +36,7 @@ This document is for anyone taking over the **movie, TV, and music** multi-agent
 | `cineai/backup.sh` | **Nightly backup** — tars `.env` + `data/` to `~/backups/smartmoviesearch` (keeps 14). Milvus is derived; restore via `ingest_ebert.py`. |
 | `cineai/devops_check.py` | **Nightly DevOps health check** — containers/app/disk/mem/backup/cert/ingest/evals → pings healthchecks.io (`smartmovie_search_devops`); emails only when 🔴 (or the ping fails). |
 | `cineai/seo_check.py` | **Daily SEO audit** — title/description/OG/Twitter/canonical/JSON-LD + real robots.txt & sitemap.xml → pings healthchecks.io (`smartmovie_search_seo`); emails only on issues. |
-| `cineai/healthcheck.py` | healthchecks.io pinger (ok → ping, red → `/fail`). Key in `~/.config/healthchecks.env` (`HC_PING_KEY=`, chmod 600, never in the repo). No key / ping fails → the caller emails instead. |
+| `cineai/healthcheck.py` | healthchecks.io pinger (ok → ping, red → `/fail`). Ping URLs in `~/.config/healthchecks.env` (`<slug>=https://hc-ping.com/<uuid>` per check, chmod 600, never in the repo). No key / ping fails → the caller emails instead. |
 | `cineai/send_email.py` | Shared SMTP notifier (reads `SMTP_*`/`ADMIN_EMAIL` from `backend/.env`; no-ops if unset). |
 | `cineai/frontend/src/components/RoutingRulesModal.tsx` | **Rules** UI (loads `/api/rules`) |
 | `cineai/frontend/src/components/{UsageBadge,CompareView,PasswordGate}.tsx` | Token meter + free-quota chip; RAG compare two-column view; optional sign-in modal |

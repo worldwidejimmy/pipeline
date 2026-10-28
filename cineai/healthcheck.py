@@ -6,13 +6,14 @@ Ping healthchecks.io for a scheduled job, so all-green runs don't need an email.
     if not ping("smartmovie_search_devops", ok=not issues, body=report):
         send the email                     # red, OR the ping didn't get through
 
-Pings https://hc-ping.com/<HC_PING_KEY>/<slug> (success) or …/<slug>/fail, with the
-report as the POST body so it shows in the check's event log. A job that never
-runs (cron broken, box down) sends no ping, and healthchecks.io alerts on that.
+Pings the check's URL (success) or <url>/fail, with the report as the POST body so
+it shows in the check's event log. A job that never runs (cron broken, box down)
+sends no ping, and healthchecks.io alerts on that.
 
-The project ping key lives in ~/.config/healthchecks.env (chmod 600, outside every
-repo; this repo is public) as HC_PING_KEY=…, or in the environment. Returns False when
-it's missing or the ping fails, so callers fall back to emailing: a green
+URLs live in ~/.config/healthchecks.env (chmod 600, outside every repo; this repo is
+public): either one line per check, `<slug>=https://hc-ping.com/<uuid>`, or a project
+`HC_PING_KEY=…` (then the URL is hc-ping.com/<key>/<slug>). Returns False when
+neither is set or the ping fails, so callers fall back to emailing: a green
 run is never silently dropped.
 
 CLI (for shell jobs):  healthcheck.py <slug> ok|fail  < body
@@ -28,22 +29,30 @@ BASE = "https://hc-ping.com"
 MAX_BODY = 100_000            # healthchecks.io keeps up to 100 kB of the body
 
 
-def _ping_key() -> str:
-    key = os.environ.get("HC_PING_KEY", "")
-    if not key and CONF.is_file():
+def _conf() -> dict[str, str]:
+    out = {}
+    if CONF.is_file():
         for ln in CONF.read_text().splitlines():
             k, _, v = ln.strip().partition("=")
-            if k == "HC_PING_KEY":
-                key = v.strip().strip("'\"")
-    return key
+            if k and v and not k.startswith("#"):
+                out[k.strip()] = v.strip().strip("'\"")
+    return out
+
+
+def _url(slug: str) -> str:
+    conf = _conf()
+    if conf.get(slug):
+        return conf[slug]
+    key = os.environ.get("HC_PING_KEY") or conf.get("HC_PING_KEY", "")
+    return f"{BASE}/{key}/{slug}" if key else ""
 
 
 def ping(slug: str, ok: bool, body: str = "") -> bool:
-    key = _ping_key()
-    if not key:
-        print(f"[healthcheck] no HC_PING_KEY ({CONF}) — not pinged", file=sys.stderr)
+    url = _url(slug)
+    if not url:
+        print(f"[healthcheck] no URL for {slug} in {CONF} — not pinged", file=sys.stderr)
         return False
-    url = f"{BASE}/{key}/{slug}" + ("" if ok else "/fail")
+    url = url.rstrip("/") + ("" if ok else "/fail")
     for attempt in range(3):
         try:
             req = urllib.request.Request(url, data=body.encode()[:MAX_BODY], method="POST")
