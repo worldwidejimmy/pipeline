@@ -49,7 +49,7 @@ interface EvalTier { tier: string; name: string; status: string; headline: strin
 interface EvalSummary { updated?: string; model?: string; tiers: EvalTier[] }
 
 const TIER_LABEL: Record<string, string> = {
-  t1: 'Routing', t2: 'Retrieval', t3: 'Answer quality (LLM judge)', t4: 'Canary questions', t5: 'Latency',
+  t1: 'Routing', t2: 'Retrieval', t3: 'Answer quality (LLM judge)', t4: 'Canary questions', t5: 'Latency', t6: 'MCP server',
 }
 
 function hoursAgo(iso?: string): string {

@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import statistics
 import sys
 import time
@@ -436,6 +437,70 @@ async def run_quality(verbose: bool) -> dict:
 
 
 # ── Baseline gate ───────────────────────────────────────────────────────────────
+# ── T6 MCP interface ──────────────────────────────────────────────────────────
+# A real MCP client over real HTTP against the running server: the tool contract
+# (pinned snapshot: a changed description/schema is a rug-pull vector, so drift
+# fails), every tool on a known question, and the DNS-rebinding guard still on.
+MCP_URL = os.getenv("MCP_EVAL_URL", "http://127.0.0.1:8001/mcp")
+MCP_SNAPSHOT = HERE / "fixtures" / "mcp_tools.json"
+
+
+def mcp_contract_diff(live: list[dict], pinned: list[dict]) -> list[str]:
+    """Names of tools added, removed or changed vs the pinned snapshot. Pure — unit-tested."""
+    a, b = {t["name"]: t for t in live}, {t["name"]: t for t in pinned}
+    return sorted([f"+{n}" for n in a.keys() - b.keys()] + [f"-{n}" for n in b.keys() - a.keys()]
+                  + [f"~{n}" for n in a.keys() & b.keys() if a[n] != b[n]])
+
+
+def _probe(headers: dict) -> int:
+    import urllib.error
+    import urllib.request
+    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}).encode()
+    req = urllib.request.Request(MCP_URL, data=body, headers={
+        "Content-Type": "application/json", "Accept": "application/json, text/event-stream", **headers})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
+
+
+async def run_mcp(verbose: bool) -> dict:
+    from mcp import Client
+
+    cases = _load("mcp.jsonl")
+    rows, drift = [], []
+    async with Client(MCP_URL) as client:
+        live = sorted((t.model_dump(by_alias=True, exclude_none=True, mode="json")
+                       for t in (await client.list_tools()).tools), key=lambda t: t["name"])
+        drift = mcp_contract_diff(live, json.loads(MCP_SNAPSHOT.read_text()))
+        for c in cases:
+            t0 = time.time()
+            try:
+                r = await client.call_tool(c["tool"], c["args"])
+                text = r.content[0].text if r.content else ""
+                problems = ["tool error: " + text[:120]] if r.is_error else \
+                    [f"missing {w!r}" for w in c["contains"] if w.lower() not in text.lower()]
+            except Exception as e:
+                problems = [f"{type(e).__name__}: {str(e)[:120]}"]
+            rows.append({"id": c["id"], "tool": c["tool"], "ok": not problems, "problems": problems,
+                         "ms": int((time.time() - t0) * 1000)})
+            if verbose:
+                print(f"  {'✓' if not problems else '✗'} {c['id']:22} {c['tool']:22} {rows[-1]['ms']:6}ms"
+                      + ("" if not problems else f"\n      {'; '.join(problems)}"))
+    sec = {"evil_host": _probe({"Host": "evil.example"}), "evil_origin": _probe({"Origin": "https://evil.example"})}
+    sec_ok = sec["evil_host"] in (400, 403, 421) and sec["evil_origin"] in (400, 403)
+    if verbose:
+        print(f"  {'✓' if not drift else '✗'} tool contract vs snapshot {'' if not drift else drift}")
+        print(f"  {'✓' if sec_ok else '✗'} DNS-rebinding guard: Host→{sec['evil_host']} Origin→{sec['evil_origin']}")
+    ok_n = sum(r["ok"] for r in rows)
+    return {"tier": "t6", "name": "mcp", "at": _now(), "n": len(rows), "pass_rate": round(ok_n / len(rows), 4),
+            "failures": sorted(r["id"] for r in rows if not r["ok"]), "contract_drift": drift,
+            "security": sec, "security_ok": sec_ok, "tools": len(live),
+            "headline": f"{ok_n}/{len(rows)} tool checks · {len(live)} tools pinned · origin guard {'on' if sec_ok else 'OFF'}",
+            "cases": rows}
+
+
 def gate(res: dict, base_all: dict) -> tuple[str, list[str]]:
     """Compare one tier's result to its baseline → ("pass"|"fail"|"new", messages).
     Improvements are reported but never auto-written: bumping the baseline is a
@@ -481,6 +546,17 @@ def gate(res: dict, base_all: dict) -> tuple[str, list[str]]:
         new = sorted(set(res["failures"]) - set(base.get("failures", [])))
         if new:
             msgs.append(f"newly failing: {', '.join(new)}")
+    elif tier == "t6":
+        new = sorted(set(res["failures"]) - set(base.get("failures", [])))
+        if new:
+            failed = True
+            msgs.append(f"REGRESSION — MCP tool checks failing: {', '.join(new)}")
+        if res["contract_drift"]:
+            failed = True
+            msgs.append(f"TOOL CONTRACT CHANGED — {', '.join(res['contract_drift'])} (update evals/fixtures/mcp_tools.json if intended)")
+        if not res["security_ok"]:
+            failed = True
+            msgs.append(f"SECURITY — DNS-rebinding guard not refusing: {res['security']}")
     elif tier == "t5":
         if base.get("p95_ms") and res.get("p95_ms") and res["p95_ms"] > base["p95_ms"] * 2:
             failed = True
@@ -514,14 +590,14 @@ def record(results: list[dict], model: dict) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--tier", default="t2", help="comma list of t1,t2,t3,t4 (t5 rides on t4) or 'nightly'")
+    ap.add_argument("--tier", default="t2", help="comma list of t1,t2,t3,t4,t6 (t5 rides on t4) or 'nightly'")
     ap.add_argument("--k", type=int, default=None, help="override top_k (t2 sweep)")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--no-gate", action="store_true", help="report only, never exit non-zero")
     a = ap.parse_args()
 
-    tiers = {"t1", "t2", "t4"} if a.tier == "nightly" else set(a.tier.split(","))
-    unknown = tiers - {"t1", "t2", "t3", "t4", "t5"}
+    tiers = {"t1", "t2", "t4", "t6"} if a.tier == "nightly" else set(a.tier.split(","))
+    unknown = tiers - {"t1", "t2", "t3", "t4", "t5", "t6"}
     if unknown:
         print(f"unknown/unimplemented tier(s): {', '.join(sorted(unknown))} — see EVALS-PLAN.md")
         return 2
@@ -550,6 +626,10 @@ def main() -> int:
             if verbose:
                 print(f"\nT4 canaries — full pipeline, model {model['model']}\n")
             out.extend(await run_canaries(verbose))
+        if "t6" in tiers:
+            if verbose:
+                print(f"\nT6 MCP — real client over HTTP ({MCP_URL})\n")
+            out.append(await run_mcp(verbose))
         return out
 
     results = asyncio.run(run_all())

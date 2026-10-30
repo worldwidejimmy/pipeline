@@ -2041,6 +2041,7 @@ html, body, #root {
 .admin-chip button:hover { color: var(--red); }
 
 .admin-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.admin-table-wrap { overflow-x: auto; max-width: 100%; }
 .admin-table th {
   text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
   color: var(--text-muted); padding: 6px 8px; border-bottom: 1px solid var(--border);

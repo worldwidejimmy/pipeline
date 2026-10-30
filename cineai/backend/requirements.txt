@@ -20,6 +20,10 @@ pypdf>=4.0.0
 beautifulsoup4>=4.12.0
 lxml>=5.0.0
 
+# MCP server (src/mcp_server.py). Pinned exactly: it's a security boundary.
+mcp==2.3.0
+PyJWT[crypto]>=2.10.0
+
 # Observability
 langsmith>=0.2.0
 

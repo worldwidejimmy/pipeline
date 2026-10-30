@@ -143,3 +143,22 @@ built from `latest.json` with an explicit allow-list of fields.
 Nightly T1+T2+T4+T5 on Haiku 5.5 costs about **$0.03/night**. Weekly T3 costs about
 **$0.20**. That is **under $2/month** all-in, and well under today's live traffic cost,
 since moving to Haiku 5.5 alone cuts per-query spend ~10×.
+
+---
+
+# Phase 2 (started 2026-10-30): agent interfaces, observability, safety
+
+Order, each shipped as code → tests/evals → docs → commit → push:
+
+1. **MCP server**: public retrieval tools plus an OAuth-protected `ask`. Design and threat
+   model in `MCP-PLAN.md`.
+2. **Tracing**: LangSmith traces per question (supervisor → agent → tool → model) with
+   tokens/cost per span. No IPs or user identifiers in traces.
+3. **Guardrails + red-team eval tier**: prompt-injection/jailbreak cases, including
+   injection planted in retrieved content.
+4. **CI on GitHub**: unit tests plus a server-side copy of the privacy guard on every
+   push/PR (the local hooks don't run on web merges), and an eval badge.
+5. **Prompt caching**: on the large system prompts, measured with T5.
+6. **Reranker** in RAG, with a before/after on T2.
+7. **Answer feedback** (👍/👎) feeding the eval datasets.
+8. **Structured outputs** for supervisor routing.

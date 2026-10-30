@@ -1,12 +1,12 @@
 {
-  "_note": "Per-tier regression baselines read by evals/run_evals.py. Bumping a value is a deliberate, reviewable commit \u2014 never auto-written.",
+  "_note": "Per-tier regression baselines read by evals/run_evals.py. Bumping a value is a deliberate, reviewable commit — never auto-written.",
   "t2": {
     "hit_rate": 1.0,
     "mrr": 0.825,
     "misses": [],
     "content_coverage": 1.0,
     "partial_coverage": [],
-    "_note": "Baseline bumped 2026-08-27 after hierarchical chunking (round 2). Deliberate trade accepted: MRR 0.883->0.825 (a few rank-1s now rank-2; larger merged sections embed more diffusely) in exchange for content coverage 84%->100% \u2014 police-albums, THE historical bug, now retrieves all 5 albums in one chunk. hit@k 100%. Round history: flat-800 chunking cov 20% MRR .883 | per-### cov 40% MRR .800 + music-in-film MISS | hierarchical cov 100% MRR .825, no misses."
+    "_note": "Baseline bumped 2026-08-27 after hierarchical chunking (round 2). Deliberate trade accepted: MRR 0.883->0.825 (a few rank-1s now rank-2; larger merged sections embed more diffusely) in exchange for content coverage 84%->100% — police-albums, THE historical bug, now retrieves all 5 albums in one chunk. hit@k 100%. Round history: flat-800 chunking cov 20% MRR .883 | per-### cov 40% MRR .800 + music-in-film MISS | hierarchical cov 100% MRR .825, no misses."
   },
   "t1": {
     "accuracy": 0.979,
@@ -16,7 +16,7 @@
   },
   "t4": {
     "failures": [],
-    "_note": "2026-10-18, claude-haiku-5-5: 6/6. The inception canary found a real bug on day one: the TMDB payload was cut at 6000 chars with search results first, truncating the crew \u2014 no director in any film answer, on Haiku 4.5 AND 5.5."
+    "_note": "2026-10-18, claude-haiku-5-5: 6/6. The inception canary found a real bug on day one: the TMDB payload was cut at 6000 chars with search results first, truncating the crew — no director in any film answer, on Haiku 4.5 AND 5.5."
   },
   "t5": {
     "p95_ms": 13500,
@@ -27,6 +27,10 @@
     "pass_rate": 1.0,
     "tolerance": 0.15,
     "failures": [],
-    "_note": "2026-10-18: generator claude-haiku-5-5, judge claude-sonnet-5-5 @ medium effort. 14/14 pass (10 answerable, 4 unanswerable), groundedness 4.71/5, judge calibration 4/4. Gate: calibration must be 4/4 (else scores are untrusted) and pass rate may not drop >15 pts (~3 cases). A 100% start means this set is easy \u2014 add harder cases as real failures are seen."
+    "_note": "2026-10-18: generator claude-haiku-5-5, judge claude-sonnet-5-5 @ medium effort. 14/14 pass (10 answerable, 4 unanswerable), groundedness 4.71/5, judge calibration 4/4. Gate: calibration must be 4/4 (else scores are untrusted) and pass rate may not drop >15 pts (~3 cases). A 100% start means this set is easy — add harder cases as real failures are seen."
+  },
+  "t6": {
+    "failures": [],
+    "_note": "MCP interface (src/mcp_server.py): every tool check must pass, the live tool contract must equal evals/fixtures/mcp_tools.json, and the Host/Origin guard must refuse. Any of those failing is a regression."
   }
 }

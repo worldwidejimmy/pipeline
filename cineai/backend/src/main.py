@@ -27,6 +27,7 @@ from src.graph.pipeline import build_pipeline, CineState, _get_memory
 from src.tools import tmdb_client
 from src import usage
 from src.llm import text_of
+from src import mcp_server
 from src.compare import compare_stream
 
 app = FastAPI(title="SmartMovieSearch", version="2.0.0")
@@ -701,7 +702,7 @@ async def admin_blacklist(body: _BlacklistRequest, request: Request):
 # ── Evals + model (admin detail; public summary) ─────────────────────────────
 # Written by evals/run_evals.py (nightly via eval_nightly.sh); evals/ is bind-mounted.
 _EVALS_DIR = Path(os.getenv("EVALS_RESULTS_DIR", "/app/evals/results"))
-_TIER_ORDER = ("t1", "t2", "t3", "t4", "t5")
+_TIER_ORDER = ("t1", "t2", "t3", "t4", "t5", "t6")
 
 
 def _read_json(path: Path, default):
@@ -767,6 +768,21 @@ async def admin_model(request: Request):
     }
 
 
+@app.get("/api/admin/mcp")
+async def admin_mcp(request: Request):
+    """MCP usage from the audit log: per-day calls, errors, distinct callers (hashed)."""
+    _require_admin(request)
+    return mcp_server.stats()
+
+
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "service": "smartmoviesearch-backend", "version": "2.0.0"}
+
+
+# ── MCP: /mcp (public tools) and /mcp/agent (OAuth) sit beside the API ─────────
+# Wrapping keeps the MCP transport out of FastAPI's routing and middleware (CORS
+# etc.); the gateway enforces its own Host/Origin checks, rate limits and auth.
+# Defined last so every @app route above is registered on the FastAPI instance.
+api = app
+app = mcp_server.mount(api)

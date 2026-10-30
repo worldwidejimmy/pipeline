@@ -4,14 +4,14 @@
  * Every byte of data here comes from admin-gated endpoints (/api/admin/*, checked
  * server-side). This page's CODE ships in the public bundle, which is fine — it
  * holds no data. Sections: evals (latest + trend + failing cases), the live model,
- * cost & latency, usage & abuse, and service health.
+ * cost & latency, MCP usage, usage & abuse, and service health.
  */
 import { useCallback, useEffect, useState } from 'react'
 import { apiFetch, clearAccessToken, getAccessToken, setAccessToken } from './api'
 import { AdminUsagePanel } from './components/AdminUsagePanel'
 import { Sparkline } from './components/Sparkline'
 
-type Tier = 't1' | 't2' | 't3' | 't4' | 't5'
+type Tier = 't1' | 't2' | 't3' | 't4' | 't5' | 't6'
 type Row = Record<string, any>
 
 interface EvalsData {
@@ -32,6 +32,7 @@ const TIERS: { id: Tier; title: string; what: string; metric: string; fmt: (v: n
   { id: 't3', title: 'Answer quality', what: 'LLM judge: grounded, relevant, complete; admits unknowns', metric: 'pass_rate', fmt: v => `${Math.round(v * 100)}%` },
   { id: 't4', title: 'Canaries', what: 'Known-good questions end to end', metric: 'pass_rate', fmt: v => `${Math.round(v * 100)}%` },
   { id: 't5', title: 'Cost & latency', what: 'From the canary runs', metric: 'p50_ms', fmt: v => `${(v / 1000).toFixed(1)}s p50` },
+  { id: 't6', title: 'MCP server', what: 'Real MCP client: tool contract pinned, each tool, Origin guard', metric: 'pass_rate', fmt: v => `${Math.round(v * 100)}%` },
 ]
 
 function ago(iso?: string | number): string {
@@ -89,12 +90,12 @@ function Failures({ tier, cases }: { tier: Tier; cases: Row[] }) {
       <ul>
         {bad.map(c => (
           <li key={c.id}>
-            <code>{c.id}</code> <span className="adm-q">“{c.q}”</span>
+            <code>{c.id}</code> <span className="adm-q">{c.q ? `“${c.q}”` : c.tool}</span>
             <div className="adm-dim">
               {tier === 't1' && <>expected <b>{c.expect}</b>, got <b>{c.got ?? 'error'}</b>{c.ok ? ' (acceptable alternate)' : ''}</>}
               {tier === 't2' && (c.hit ? `found the doc but missing: ${c.missing_content.join(', ')}` : `miss — got ${c.got?.slice(0, 3).join(', ') || 'nothing'}`)}
               {tier === 't3' && (c.error || `${c.kind === 'calibration' ? 'JUDGE DISAGREED with known verdict' : c.kind} · G${c.verdict?.groundedness} R${c.verdict?.relevance} C${c.verdict?.completeness} — ${c.verdict?.reason ?? ''}`)}
-              {tier === 't4' && c.problems?.join('; ')}
+              {(tier === 't4' || tier === 't6') && c.problems?.join('; ')}
             </div>
           </li>
         ))}
@@ -175,6 +176,41 @@ function CostSection({ data }: { data: EvalsData | null }) {
   )
 }
 
+interface McpDay { day: string; calls: number; errors: number; callers: number; by_tool: Record<string, number> }
+
+/** Who is using the MCP server: per-day calls from the audit log (callers are salted
+ *  IP hashes, so this counts distinct clients without storing who they are). */
+function McpSection() {
+  const [d, setD] = useState<{ enabled: boolean; agent_endpoint: boolean; days: McpDay[] } | null>(null)
+  useEffect(() => { apiFetch('/api/admin/mcp').then(r => r.json()).then(setD).catch(() => {}) }, [])
+  if (!d) return <div className="adm-dim">Loading…</div>
+  return (
+    <>
+      <dl className="adm-kv">
+        <div className="adm-kv-row"><dt>Public tools</dt><dd>
+          <span className={`status-badge ${d.enabled ? 'badge-ok' : 'badge-err'}`}>{d.enabled ? '✓ on' : '✕ disabled'}</span>
+          {' '}<code>https://smartmoviesearch.com/mcp</code></dd></div>
+        <div className="adm-kv-row"><dt>Agent (OAuth)</dt><dd>
+          <span className={`status-badge ${d.agent_endpoint ? 'badge-ok' : 'badge-loading'}`}>{d.agent_endpoint ? '✓ on' : '• not configured'}</span>
+          {' '}<code>/mcp/agent</code></dd></div>
+      </dl>
+      {d.days.length === 0 ? <div className="adm-dim">No MCP calls yet.</div> : (
+        <div className="admin-table-wrap" style={{ marginTop: 12 }}><table className="admin-table">
+          <thead><tr><th>Day (UTC)</th><th>Calls</th><th>Errors</th><th>Callers</th><th>By tool</th></tr></thead>
+          <tbody>
+            {[...d.days].reverse().map(x => (
+              <tr key={x.day}>
+                <td>{x.day}</td><td>{x.calls}</td><td>{x.errors}</td><td>{x.callers}</td>
+                <td className="adm-dim">{Object.entries(x.by_tool).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(' · ')}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table></div>
+      )}
+    </>
+  )
+}
+
 function HealthSection() {
   const [s, setS] = useState<Row | null>(null)
   useEffect(() => { apiFetch('/api/status').then(r => r.json()).then(setS).catch(() => setS({})) }, [])
@@ -245,6 +281,10 @@ export default function AdminPage() {
           <section className="adm-section">
             <h2>Model</h2>
             <ModelSection m={model} />
+          </section>
+          <section className="adm-section">
+            <h2>MCP server <span className="adm-dim">· last 7 days, from the audit log</span></h2>
+            <McpSection />
           </section>
           <section className="adm-section">
             <h2>Usage &amp; abuse</h2>

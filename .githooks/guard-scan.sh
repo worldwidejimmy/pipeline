@@ -36,7 +36,7 @@ while IFS= read -r f; do
       say "archive/encrypted blob staged (backups don't belong here): $f" ;;
     *.sqlite|*.sqlite3|*.db)
       say "database file staged: $f" ;;
-    *ip_blacklist*|*ops-logs*|*nightly-logs*)
+    *ip_blacklist*|*ops-logs*|*nightly-logs*|*mcp-logs*|*mcp-salt*)
       say "ops/visitor data staged (contains IPs/history): $f" ;;
   esac
 done < <(git diff --name-only --diff-filter=ACMR "$@")

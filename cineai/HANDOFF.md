@@ -575,10 +575,11 @@ the 30/day cap. Every result records the model id.
 | T2 | 20 retrieval cases: hit@k, MRR, **content coverage** | ~$0 | `make eval-t2` |
 | T4 | 6 full-pipeline canaries: must-contain facts, must-not-say "couldn't find" | ~$0.01 | `make eval-t4` |
 | T5 | p50/p95 latency, tokens/query, $/query — from the T4 runs | $0 | (with T4) |
+| T6 | MCP interface: a real MCP client over HTTP checks the tool contract against `evals/fixtures/mcp_tools.json`, each tool on a known question, and that the Host/Origin guard refuses | ~$0 | `make eval-t6` |
 | T3 | weekly LLM judge (newest Sonnet) on 14 live answers incl. 4 unanswerable, + 4 calibration answers that check the judge | ~$0.2 | `--tier t3` |
 
 - **Unattended:** `eval_nightly.sh`, cron **04:20 UTC** (before the 04:50 ops digest) —
-  T1/T2/T4/T5 nightly, +T3 on Sundays. Exit 1 = regression, 3 = harness crashed; either
+  T1/T2/T4/T5/T6 nightly, +T3 on Sundays. Exit 1 = regression, 3 = harness crashed; either
   **emails the admin** via `send_email.py` → server-management `notify-admin.sh`.
 - **Results:** `evals/` is bind-mounted into the backend; `evals/results/` (gitignored)
   holds `<tier>_*.jsonl` history, `<tier>_last_cases.json` and `latest.json`.
@@ -598,6 +599,30 @@ Track record — bugs the evals caught that tests didn't:
 - T4, day one: film answers never named the director (TMDB payload truncated before the crew);
   MusicBrainz 503s (1 req/s) turned whole answers into errors.
 - Running them also found `tests/e2e.mjs` hadn't parsed since compare mode shipped.
+- 2026-10-27, a T4 flake on `cars` exposed the music agent cutting its data (indented JSON at
+  6k chars) mid-release-list.
+
+## MCP server (added 2026-10-30)
+
+`src/mcp_server.py`; design and threat model in `MCP-PLAN.md`. The FastAPI app is wrapped
+by `mcp_server.Gateway` (last lines of `main.py`): `/mcp` and the OAuth metadata go to the
+MCP apps, everything else to FastAPI. The frontend nginx proxies those paths to the backend.
+
+- **Public `/mcp`:** 5 read-only tools, no LLM spend. 30/min and 500/day per IP (real IP
+  from `CF-Connecting-IP`), 5000/day in total, the shared IP blacklist applies, 64 KB body cap.
+- **`/mcp/agent` (`ask`):** mounted only when `MCP_OAUTH_ISSUER` and `MCP_OAUTH_AUDIENCE`
+  are set (`MCP_OAUTH_JWKS_URL` and `MCP_OAUTH_SCOPE` are optional; see `.env.example`).
+  The audience must be exactly `https://smartmoviesearch.com/mcp/agent`. 25 questions per
+  user per day, and the global token hard cap still applies.
+- **Kill switch:** `MCP_ENABLED=false` in `.env`, then recreate the backend. That returns 503
+  on `/mcp*` and leaves the site untouched.
+- **Audit log:** `backend/data/mcp-logs/mcp-YYYY-MM-DD.jsonl` (tool, ms, ok, salted IP hash;
+  90 days). The salt is `backend/data/mcp-salt` (0600). Per-day counts are on `/admin`.
+- **Changing a tool's name, description, schema or annotations** fails the unit tests and
+  T6 until you regenerate the pinned contract: `cd backend && .tests-venv/bin/python -m
+  tests.test_mcp_server --update`. Review that diff: it is exactly what every client sees.
+- **Try it:** `claude mcp add --transport http smartmoviesearch https://smartmoviesearch.com/mcp`,
+  or the MCP Inspector against the same URL.
 
 ## Model selection (added 2026-10)
 

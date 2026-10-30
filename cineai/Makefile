@@ -75,13 +75,16 @@ eval-t1: ## T1 routing evals — supervisor only, ~48 tiny LLM calls (<$0.01)
 eval-t4: ## T4 canaries + T5 cost/latency — 6 full-pipeline queries (~$0.01)
 	$(COMPOSE) exec -T backend python3 /app/evals/run_evals.py --tier t4
 
+eval-t6: ## T6 MCP interface — real MCP client over HTTP: tool contract, each tool, Origin guard (~$0)
+	$(COMPOSE) exec -T backend python3 /app/evals/run_evals.py --tier t6
+
 eval-nightly: ## T1+T2+T4+T5 — what the nightly timer runs; non-zero exit on regression
 	$(COMPOSE) exec -T backend python3 /app/evals/run_evals.py --tier nightly
 
 test-unit: ## Backend unit tests (usage.py etc.) — free, no Docker/API keys needed
-	@test -x $(BACKEND_DIR)/.tests-venv/bin/python || \
-		(python3 -m venv $(BACKEND_DIR)/.tests-venv && \
-		 $(BACKEND_DIR)/.tests-venv/bin/pip install -q fastapi pytest)
+	@test -x $(BACKEND_DIR)/.tests-venv/bin/python || python3 -m venv $(BACKEND_DIR)/.tests-venv
+	@$(BACKEND_DIR)/.tests-venv/bin/python -c "import fastapi, pytest, mcp, jwt" 2>/dev/null || \
+		$(BACKEND_DIR)/.tests-venv/bin/pip install -q fastapi pytest "mcp==2.3.0" "PyJWT[crypto]>=2.10.0"
 	cd $(BACKEND_DIR) && .tests-venv/bin/python -m pytest -q tests/
 
 test-e2e: ## Playwright browser test of the running stack (costs 1 search + tokens; E2E_LIVE=1 adds a live-site check)

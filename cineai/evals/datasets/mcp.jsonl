@@ -1,0 +1,6 @@
+{"id": "kb-nolan", "tool": "search_knowledge_base", "args": {"query": "Christopher Nolan directing style", "top_k": 5}, "contains": ["christopher-nolan"], "why": "RAG over the curated guides, through MCP"}
+{"id": "kb-ebert-fargo", "tool": "search_knowledge_base", "args": {"query": "What did Roger Ebert think of Fargo?", "top_k": 5}, "contains": ["ebert/fargo", "rogerebert.com/reviews/fargo"], "why": "Ebert excerpt + the link built for it"}
+{"id": "titles-inception", "tool": "find_titles", "args": {"query": "Inception"}, "contains": ["27205"], "why": "TMDB search returns the id get_title needs"}
+{"id": "title-inception-crew", "tool": "get_title", "args": {"tmdb_id": 27205, "media_type": "movie"}, "contains": ["Christopher Nolan", "Director"], "why": "crew survives the trimming (the T4 director bug, MCP side)"}
+{"id": "person-gerwig", "tool": "find_person", "args": {"name": "Greta Gerwig"}, "contains": ["Greta Gerwig", "biography"], "why": "TMDB person path"}
+{"id": "artist-police", "tool": "get_artist", "args": {"name": "The Police"}, "contains": ["Synchronicity", "Outlandos"], "why": "MusicBrainz path through the shared rate limiter"}

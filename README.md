@@ -245,6 +245,45 @@ every query.
 
 ---
 
+## MCP server: use the knowledge base from any agent
+
+SmartMovieSearch is also a remote **Model Context Protocol** server (official Python SDK,
+Streamable HTTP, stateless), so Claude Desktop, Claude Code, Cursor or your own agent can
+use its retrieval stack as tools:
+
+```bash
+claude mcp add --transport http smartmoviesearch https://smartmoviesearch.com/mcp
+```
+
+| Tool | What it does |
+|---|---|
+| `search_knowledge_base` | Hybrid BM25 + dense (RRF) search over the curated guides and Ebert review excerpts |
+| `find_titles` / `get_title` | TMDB search, then details: crew, cast, similar titles |
+| `find_person` | TMDB person lookup with biography and best-known titles |
+| `get_artist` | MusicBrainz artist and discography |
+
+The public endpoint exposes **primitives, not the agent**: the caller's model does the
+synthesis, so a call costs about $0 here. The full multi-agent `ask` tool lives at
+`/mcp/agent` behind **OAuth 2.1**.
+
+Security is designed around the ways early MCP deployments failed (threat model:
+`cineai/MCP-PLAN.md`):
+- **OAuth 2.1 resource server:** JWTs checked for signature (asymmetric algorithms only),
+  issuer, expiry, scope and **audience = this server** (RFC 8707). Tokens are never
+  passed through, and clients discover the auth server via RFC 9728 metadata.
+- **DNS-rebinding guard:** `Host`/`Origin` allow-lists.
+- **Abuse limits:** per-IP and global rate limits, size caps and a kill switch.
+- **Indirect prompt-injection hygiene:** our results are someone else's model input, so
+  HTML and invisible/bidi/tag Unicode are stripped, and tools label their output as data.
+- **Read-only tools.**
+- **Pinned tool definitions:** a changed description is a test failure, not a silent rug-pull.
+- **Audit log** with salted IP hashes only.
+
+A nightly eval tier (T6) drives a real MCP client against the live server and checks the
+tool contract, every tool and the Origin guard.
+
+---
+
 ## Observability with LangSmith
 
 When `LANGCHAIN_TRACING_V2=true`, every graph execution is automatically
@@ -268,12 +307,15 @@ traced — no instrumentation code required. The LangSmith UI shows:
 | `GET /api/trending` | Trending movies from TMDB |
 | `GET /api/history?thread_id=<id>` | Conversation history for a thread |
 | `GET /api/health` | Health check |
+| `POST /mcp` | MCP server (Streamable HTTP): public read-only tools |
+| `POST /mcp/agent` | MCP `ask` tool, OAuth 2.1 bearer (when configured) |
 
 ---
 
 ## Roadmap
 
-- [x] **Automated evals** — routing accuracy, retrieval hit@k/MRR/content coverage, full-pipeline canaries, cost/latency, and a calibrated LLM judge (groundedness, unanswerable questions) — nightly, gated, alerting. See `cineai/EVALS-PLAN.md`.
+- [x] **Automated evals** — routing accuracy, retrieval hit@k/MRR/content coverage, full-pipeline canaries, cost/latency, the MCP interface, and a calibrated LLM judge (groundedness, unanswerable questions) — nightly, gated, alerting. See `cineai/EVALS-PLAN.md`.
+- [x] **MCP server**: public retrieval tools plus an OAuth 2.1-protected agent tool, with a threat model and a nightly MCP eval tier. See `cineai/MCP-PLAN.md`.
 - [ ] **Redis semantic cache** — skip the LLM for repeated or near-identical queries
 - [ ] **Streaming tokens in Event Log** — surface token stream in the observability panel alongside the answer
 - [ ] **User-provided documents** — API endpoint to ingest uploaded files into a per-session collection
