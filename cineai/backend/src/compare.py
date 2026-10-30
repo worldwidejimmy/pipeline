@@ -21,6 +21,7 @@ import asyncio
 import json
 import random
 import time
+import uuid
 from typing import AsyncIterator
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -28,7 +29,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from src.judge_labels import LabelNormaliser
 from src.llm import get_chat, model_id, text_of
 from src.tools.milvus_retriever import retrieve
-from src import usage
+from src import tracing, usage
 
 _RAG_SYSTEM = """You are a film expert with deep knowledge of cinema history, theory, and criticism.
 
@@ -88,6 +89,13 @@ async def compare_stream(question: str, ip: str | None = None) -> AsyncIterator[
     Plus the standard pipeline events for the observability panel.
     """
     start_ms = int(time.time() * 1000)
+    # One compare = three model calls (grounded, ungrounded, judge), traced with a shared
+    # compare_id so they can be viewed side by side. The IP never goes into a trace.
+    compare_id = uuid.uuid4().hex[:12]
+    sampled = 1.0 if random.random() < tracing.SAMPLE_RATE else 0.0      # all three or none
+    trace_cfgs = {name: tracing.run_config("compare", tags=(name,), metadata={"compare_id": compare_id},
+                                           sample=sampled)[0]
+                  for name in ("rag", "base", "judge")}
     yield _sse("compare_start", {"question": question})
     yield _sse("pipeline_start", {"question": question})
 
@@ -127,7 +135,7 @@ async def compare_stream(question: str, ip: str | None = None) -> AsyncIterator[
         await queue.put(_sse("llm_start", {"agent": agent, "model": model_id()}))
         full = None
         try:
-            async for chunk in _llm().astream(messages):
+            async for chunk in _llm().astream(messages, config=trace_cfgs[side] or None):
                 full = chunk if full is None else full + chunk
                 content = text_of(getattr(chunk, "content", None))
                 if content:
@@ -187,7 +195,7 @@ async def compare_stream(question: str, ip: str | None = None) -> AsyncIterator[
         ]
         full = None
         try:
-            async for chunk in _llm(max_tokens=400).astream(judge_messages):
+            async for chunk in _llm(max_tokens=400).astream(judge_messages, config=trace_cfgs["judge"] or None):
                 full = chunk if full is None else full + chunk
                 content = text_of(getattr(chunk, "content", None))
                 out = relabel.feed(content) if content else ""

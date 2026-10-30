@@ -508,6 +508,7 @@ html, body, #root {
 }
 
 .query-form { display: flex; gap: 8px; }
+.privacy-note { margin-top: 8px; font-size: 11.5px; line-height: 1.45; color: var(--text-muted); max-width: 640px; }
 
 .query-input-wrap {
   flex: 1;

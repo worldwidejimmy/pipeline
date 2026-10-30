@@ -23,6 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from src import tracing  # first: switches implicit tracing off before any LLM client exists
 from src.graph.pipeline import build_pipeline, CineState, _get_memory
 from src.tools import tmdb_client
 from src import usage
@@ -108,10 +109,16 @@ def _sse(event_type: str, payload: dict) -> str:
     return f"event: {event_type}\ndata: {json.dumps(payload)}\n\n"
 
 
-async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None = None) -> AsyncIterator[str]:
-    """Run the pipeline and stream typed SSE events to the frontend."""
+async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None = None,
+                           trace: dict | None = None) -> AsyncIterator[str]:
+    """Run the pipeline and stream typed SSE events to the frontend.
+
+    `trace`: kwargs for tracing.run_config (default: a sampled "web" trace). The client
+    IP is never put into the trace.
+    """
     pipeline = build_pipeline()
-    config   = {"configurable": {"thread_id": thread_id}}
+    trace_cfg, run_id = tracing.run_config(**(trace or {"source": "web"}))
+    config   = {"configurable": {"thread_id": thread_id}, **trace_cfg}
 
     # Load existing history from checkpointer so agents have context
     existing = pipeline.get_state(config)
@@ -134,6 +141,7 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
         "question":    question,
         "thread_id":   thread_id,
         "turn_number": len(history) + 1,
+        "run_id":      run_id,          # trace id (None when not sampled), for feedback
     })
 
     try:
@@ -773,6 +781,12 @@ async def admin_mcp(request: Request):
     """MCP usage from the audit log: per-day calls, errors, distinct callers (hashed)."""
     _require_admin(request)
     return mcp_server.stats()
+
+
+@app.get("/api/admin/tracing")
+async def admin_tracing(request: Request):
+    _require_admin(request)
+    return tracing.status()
 
 
 @app.get("/api/health")

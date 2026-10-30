@@ -43,6 +43,7 @@ from pathlib import Path
 
 sys.path.insert(0, "/app")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
+import src.tracing  # noqa: E402,F401  first: implicit tracing off (eval traces go to <project>-evals explicitly)
 
 HERE = Path(__file__).resolve().parent
 DATASETS = HERE / "datasets"
@@ -255,7 +256,8 @@ async def run_canaries(verbose: bool) -> tuple[dict, dict]:
         t0 = time.time()
         final, any_tok, route, err, done = [], [], None, None, {}
         try:
-            async for ev in _stream_pipeline(c["q"], f"eval-{c['id']}-{int(t0)}", client_ip=None):
+            async for ev in _stream_pipeline(c["q"], f"eval-{c['id']}-{int(t0)}", client_ip=None,
+                                             trace={"source": "eval", "eval_tier": "t4", "metadata": {"case": c["id"]}}):
                 et, d = _parse_sse(ev)
                 if et == "token":
                     (final if d.get("is_final") else any_tok).append(d.get("content", ""))
@@ -355,9 +357,11 @@ def quality_pass(case: dict, v: dict) -> bool:
 
 async def _answer_with_context(q: str, thread: str) -> tuple[str, str]:
     """Run the real graph; return (final answer, the agent outputs it was built from)."""
+    from src import tracing
     from src.graph.pipeline import build_pipeline
+    trace_cfg, _ = tracing.run_config("eval", eval_tier="t3", metadata={"thread": thread})
     state = await build_pipeline().ainvoke({"question": q, "history": []},
-                                           {"configurable": {"thread_id": thread}})
+                                           {"configurable": {"thread_id": thread}, **trace_cfg})
     parts = [f"[{k}]\n{state[k]}" for k in ("tmdb_result", "rag_result", "music_result", "search_result")
              if state.get(k)]
     return state.get("answer", ""), "\n\n".join(parts)

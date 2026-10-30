@@ -150,10 +150,11 @@ since moving to Haiku 5.5 alone cuts per-query spend ~10×.
 
 Order, each shipped as code → tests/evals → docs → commit → push:
 
-1. **MCP server**: public retrieval tools plus an OAuth-protected `ask`. Design and threat
-   model in `MCP-PLAN.md`.
-2. **Tracing**: LangSmith traces per question (supervisor → agent → tool → model) with
-   tokens/cost per span. No IPs or user identifiers in traces.
+1. ✅ **MCP server** (2026-10-30): public retrieval tools plus an OAuth-protected `ask`. Design
+   and threat model in `MCP-PLAN.md`.
+2. ✅ **Tracing** (2026-10-30): tracing was already on, but implicitly, with evals mixed in and
+   no redaction. Now one trace per question, evals in their own project, PII redaction,
+   sampling, and run ids for feedback (`src/tracing.py`).
 3. **Guardrails + red-team eval tier**: prompt-injection/jailbreak cases, including
    injection planted in retrieved content.
 4. **CI on GitHub**: unit tests plus a server-side copy of the privacy guard on every

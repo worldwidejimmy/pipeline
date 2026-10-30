@@ -136,7 +136,9 @@ function EvalCard({ t, data }: { t: typeof TIERS[number]; data: EvalsData }) {
   )
 }
 
-function ModelSection({ m }: { m: ModelInfo | null }) {
+interface TracingInfo { enabled: boolean; project: string; eval_project: string; sample_rate: number; redaction: string[] }
+
+function ModelSection({ m, tr }: { m: ModelInfo | null; tr: TracingInfo | null }) {
   if (!m) return <div className="adm-dim">Loading…</div>
   const newer = m.newest_in_tier && m.newest_in_tier !== m.model
   return (
@@ -148,6 +150,9 @@ function ModelSection({ m }: { m: ModelInfo | null }) {
       <dt>Newest in tier</dt><dd>{m.newest_in_tier ?? '—'}{newer && <span className="status-badge badge-warn"> newer available</span>}</dd>
       <dt>Thinking modes</dt><dd>{m.thinking_types.join(', ') || '—'}</dd>
       <dt>Resolved</dt><dd>{ago(m.resolved_at)}{m.error && <span className="admin-error"> {m.error}</span>}</dd>
+      <dt>Tracing</dt><dd>{!tr ? '—' : tr.enabled
+        ? <>LangSmith <code>{tr.project}</code> ({Math.round(tr.sample_rate * 100)}% sampled) · evals → <code>{tr.eval_project}</code> · redacts {tr.redaction.join(' ')}</>
+        : 'off'}</dd>
     </dl>
   )
 }
@@ -235,6 +240,7 @@ export default function AdminPage() {
   const [authed, setAuthed] = useState<boolean | null>(null)
   const [evals, setEvals] = useState<EvalsData | null>(null)
   const [model, setModel] = useState<ModelInfo | null>(null)
+  const [tracing, setTracing] = useState<TracingInfo | null>(null)
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', localStorage.getItem('sms-theme') ?? 'dark')
@@ -251,6 +257,7 @@ export default function AdminPage() {
     setAuthed(true)
     setEvals(await r.json())
     apiFetch('/api/admin/model').then(r => r.json()).then(setModel).catch(() => {})
+    apiFetch('/api/admin/tracing').then(r => r.json()).then(setTracing).catch(() => {})
   }, [])
 
   useEffect(() => { load() }, [load])
@@ -280,7 +287,7 @@ export default function AdminPage() {
           </section>
           <section className="adm-section">
             <h2>Model</h2>
-            <ModelSection m={model} />
+            <ModelSection m={model} tr={tracing} />
           </section>
           <section className="adm-section">
             <h2>MCP server <span className="adm-dim">· last 7 days, from the audit log</span></h2>

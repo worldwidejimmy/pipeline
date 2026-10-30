@@ -392,7 +392,8 @@ def _build_agent_server() -> MCPServer | None:
         _ask_counts[who] = [today, n + 1]
 
         final, other, route, err = [], [], None, None
-        async for ev in _stream_pipeline(question, f"mcp-{hash_ip(who)}-{int(time.time())}", client_ip=None):
+        async for ev in _stream_pipeline(question, f"mcp-{hash_ip(who)}-{int(time.time())}", client_ip=None,
+                                         trace={"source": "mcp"}):
             et, _, payload = ev.partition("\ndata: ")
             et = et.removeprefix("event: ").strip()
             try:

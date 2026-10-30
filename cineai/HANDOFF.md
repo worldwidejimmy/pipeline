@@ -624,6 +624,21 @@ MCP apps, everything else to FastAPI. The frontend nginx proxies those paths to 
 - **Try it:** `claude mcp add --transport http smartmoviesearch https://smartmoviesearch.com/mcp`,
   or the MCP Inspector against the same URL.
 
+## Tracing (LangSmith, made explicit 2026-10-30)
+
+`src/tracing.py`. Implicit env tracing (`LANGCHAIN_TRACING_V2`) is read once and then
+switched **off**: only explicit per-request tracers send anything. The env keys still
+decide whether tracing is on at all (key present + `LANGCHAIN_TRACING_V2=true`).
+
+- Production → project `smartmoviesearch` (root runs `web`, `compare`, `mcp`); evals →
+  `smartmoviesearch-evals` (`eval:t3`, `eval:t4`). T1 routing and the T3 judge aren't traced.
+- `redact()` runs over everything uploaded: emails, phone/card numbers, IPs, key-shaped
+  strings. IPs are never added. The app's search box says questions are logged, redacted.
+- `TRACE_SAMPLE_RATE` (default 1.0) samples production. Evals are always traced.
+- The `pipeline_start` SSE event carries `run_id` (null when not sampled), for feedback.
+- **Anything new that calls an LLM outside main.py** (a script or an eval) must
+  `import src.tracing` first, or the implicit env tracing would still be on in that process.
+
 ## Model selection (added 2026-10)
 
 `DEFAULT_MODEL_TIER` (haiku|sonnet|opus) is a **cost tier**; `src/llm.py` resolves it to

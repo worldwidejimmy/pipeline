@@ -286,13 +286,19 @@ tool contract, every tool and the Origin guard.
 
 ## Observability with LangSmith
 
-When `LANGCHAIN_TRACING_V2=true`, every graph execution is automatically
-traced — no instrumentation code required. The LangSmith UI shows:
+Tracing is explicit, not ambient (`cineai/backend/src/tracing.py`):
 
-- Which agent was routed to and why
-- Exact prompts and completions at each node
-- Token usage and latency per step
-- Full state at every edge transition
+- **One question = one trace tree.** The graph, each agent node and every model call
+  appear with tokens and latency, named after the source (`web`, `compare`, `mcp`,
+  `eval:<tier>`) and tagged with the live model.
+- **Production and evals are kept apart.** Eval runs go to a separate `-evals` project,
+  tagged by tier, so production views show only real traffic.
+- **Redaction before upload.** Emails, phone/card numbers, IP addresses and
+  API-key-shaped strings are replaced in inputs and outputs (unit-tested, including that
+  movie facts such as years, ids and budgets survive). Client IPs are never added.
+- **Sampling** with `TRACE_SAMPLE_RATE`, for when traffic outgrows 100%.
+- **Run ids flow back to the client,** so feedback can attach to the exact trace.
+- The site tells visitors their questions are logged with personal details redacted.
 
 ---
 

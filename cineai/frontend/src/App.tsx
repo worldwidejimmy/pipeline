@@ -494,6 +494,12 @@ export default function App() {
             <span className="compare-toggle-label">🆚 Compare RAG vs. no-RAG</span>
           </label>
 
+          {/* Honest about where a question goes (backend src/tracing.py redacts before upload). */}
+          <div className="privacy-note">
+            Questions are answered by Anthropic's Claude and logged for quality monitoring, with
+            emails, phone numbers and IP addresses redacted. Please don't include personal information.
+          </div>
+
           {history.length === 0 && (
             <div className="example-queries">
               {EXAMPLE_QUERIES.map(({ icon, text }) => (
