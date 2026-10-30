@@ -4,7 +4,7 @@
  * Every byte of data here comes from admin-gated endpoints (/api/admin/*, checked
  * server-side). This page's CODE ships in the public bundle, which is fine — it
  * holds no data. Sections: evals (latest + trend + failing cases), the live model,
- * cost & latency, MCP usage, usage & abuse, and service health.
+ * cost & latency, answer feedback, MCP usage, usage & abuse, and service health.
  */
 import { useCallback, useEffect, useState } from 'react'
 import { apiFetch, clearAccessToken, getAccessToken, setAccessToken } from './api'
@@ -217,6 +217,49 @@ function McpSection() {
   )
 }
 
+interface FeedbackData {
+  days: number; up: number; down: number
+  by_route: Record<string, { up: number; down: number }>
+  recent_down: { ts: string; question: string; comment: string; answer_head: string; route: string | null; model: string | null }[]
+}
+
+/** 👍/👎 from visitors (redacted server-side). 👎 rows are candidate eval cases:
+ *  `make feedback-triage` drafts them for review; nothing enters the public datasets automatically. */
+function FeedbackSection() {
+  const [d, setD] = useState<FeedbackData | null>(null)
+  useEffect(() => { apiFetch('/api/admin/feedback').then(r => r.json()).then(setD).catch(() => {}) }, [])
+  if (!d) return <div className="adm-dim">Loading…</div>
+  const total = d.up + d.down
+  return (
+    <>
+      <div className="adm-tiles">
+        <div className="adm-tile"><div className="adm-dim">👍 helpful</div><div className="adm-tile-val">{d.up}</div></div>
+        <div className="adm-tile"><div className="adm-dim">👎 not helpful</div><div className="adm-tile-val">{d.down}</div></div>
+        <div className="adm-tile"><div className="adm-dim">satisfaction</div><div className="adm-tile-val">{total ? `${Math.round((d.up / total) * 100)}%` : '—'}</div></div>
+      </div>
+      {Object.keys(d.by_route).length > 0 && (
+        <div className="adm-dim" style={{ marginTop: 10 }}>
+          by route: {Object.entries(d.by_route).map(([k, v]) => `${k} 👍${v.up} 👎${v.down}`).join(' · ')}
+        </div>
+      )}
+      {d.recent_down.length === 0 ? <div className="adm-dim" style={{ marginTop: 10 }}>No 👎 in the last {d.days} days.</div> : (
+        <details className="adm-fail" open>
+          <summary>{d.recent_down.length} recent 👎 — candidates for the eval datasets (<code>make feedback-triage</code>)</summary>
+          <ul>
+            {d.recent_down.map(r => (
+              <li key={r.ts + r.question}>
+                <span className="adm-q">“{r.question}”</span>
+                <div className="adm-dim">{ago(r.ts)} · {r.route ?? '?'} · {r.model ?? '?'}{r.comment && <> · <b>{r.comment}</b></>}</div>
+                <div className="adm-dim">answer: {r.answer_head.slice(0, 220)}{r.answer_head.length > 220 ? '…' : ''}</div>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </>
+  )
+}
+
 function HealthSection() {
   const [s, setS] = useState<Row | null>(null)
   useEffect(() => { apiFetch('/api/status').then(r => r.json()).then(setS).catch(() => setS({})) }, [])
@@ -289,6 +332,10 @@ export default function AdminPage() {
           <section className="adm-section">
             <h2>Model</h2>
             <ModelSection m={model} tr={tracing} />
+          </section>
+          <section className="adm-section">
+            <h2>Answer feedback <span className="adm-dim">· 👍/👎 from visitors, last 30 days (redacted)</span></h2>
+            <FeedbackSection />
           </section>
           <section className="adm-section">
             <h2>MCP server <span className="adm-dim">· last 7 days, from the audit log</span></h2>

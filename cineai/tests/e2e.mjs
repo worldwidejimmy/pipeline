@@ -106,6 +106,9 @@ try {
   answerBlocks === 1 ? pass('answer rendered once') : fail('answer duplicated', `${answerBlocks} blocks`)
   const events = await page.locator('.obs-event-count').innerText()
   pass('pipeline events emitted', events || '(count hidden)')
+  // 👍/👎 bar under the finished answer (not clicked: a vote would land in the real feedback log)
+  const fbVisible = await page.locator('.fb-bar .fb-btn').first().isVisible().catch(() => false)
+  fbVisible ? pass('feedback bar shown') : fail('feedback bar missing', 'no .fb-bar under the answer')
 } catch (e) { fail('search flow', String(e).slice(0, 200)) }
 await page.screenshot({ path: SHOT('2-search-result') })
 

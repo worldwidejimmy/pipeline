@@ -750,6 +750,16 @@ html, body, #root {
 
 .history-a { opacity: 0.7; }
 
+/* 👍/👎 feedback (components/FeedbackBar.tsx) */
+.fb-bar { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 12px; color: var(--text-muted); flex-wrap: wrap; }
+.fb-label { margin-right: 2px; }
+.fb-btn { background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; cursor: pointer; font-size: 13px; line-height: 1.2; }
+.fb-btn:hover { border-color: var(--indigo-light); }
+.fb-form { display: flex; gap: 6px; flex: 1; min-width: 0; }
+.fb-input { flex: 1; min-width: 0; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font-size: 12px; }
+.fb-send { background: transparent; color: var(--text-muted); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 12px; }
+.fb-done { font-style: italic; }
+
 .current-turn { animation: fade-in 0.2s ease; }
 
 @keyframes fade-in {

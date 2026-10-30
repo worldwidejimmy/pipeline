@@ -605,6 +605,8 @@ Track record — bugs the evals caught that tests didn't:
 - Running them also found `tests/e2e.mjs` hadn't parsed since compare mode shipped.
 - 2026-10-27, a T4 flake on `cars` exposed the music agent cutting its data (indented JSON at
   6k chars) mid-release-list.
+- 2026-10-30, the first real 👎 (from testing the feedback loop): "Who directed Heat?"
+  answered about WWE Heat; TMDB ranks it first. `tmdb_client.best_match` + `heat-not-wwe` canary.
 - 2026-10-30, T7 traces showed "Who directed Inception?" answering "couldn't find" ~40% of
   the time: the intent extractor answered in prose instead of JSON. Fixed with structured
   outputs; T4 has a `who-directed` canary now.
@@ -646,6 +648,21 @@ MCP apps, everything else to FastAPI. The frontend nginx proxies those paths to 
   independent secret detector that blocks the push itself.
 - README badges: CI status, and `GET /api/evals/badge` (shields.io endpoint; a tier that's
   stale counts as not passing).
+
+## Answer feedback (2026-10-30)
+
+`src/feedback.py`, `POST /api/feedback` (public), `GET /api/admin/feedback`, and the
+`FeedbackBar` under each finished answer (not in compare mode).
+- `_stream_pipeline` issues `run_id` for every answer (and uses it as the LangSmith run id
+  when traced). `pipeline_start` and `done` carry it, and `feedback.remember()` keeps the
+  redacted question and answer for 24h (1,000 max, in memory, so lost on restart).
+- A vote by id → `data/feedback/feedback-YYYY-MM.jsonl` (redacted, salted IP hash), plus
+  LangSmith `user_rating` on traced runs. A re-vote replaces the earlier one. 30 votes/h/IP.
+- `make feedback-triage` drafts 👎 into `evals/results/feedback_candidates.jsonl`
+  (gitignored). **A human** fills `contain_any`, checks the question is safe to publish,
+  then copies it into `datasets/canaries.jsonl`.
+- The feedback dir is created by the container (root-owned). Edit it via
+  `docker compose exec backend …`.
 
 ## Prompt caching (2026-10-30)
 

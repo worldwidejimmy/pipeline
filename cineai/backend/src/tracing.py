@@ -81,7 +81,8 @@ def _client():
 
 
 def run_config(source: str, *, eval_tier: str | None = None, tags: tuple[str, ...] = (),
-               metadata: dict[str, Any] | None = None, sample: float | None = None) -> tuple[dict, str | None]:
+               metadata: dict[str, Any] | None = None, sample: float | None = None,
+               run_id: uuid.UUID | None = None) -> tuple[dict, str | None]:
     """RunnableConfig additions that trace ONE request, plus its run id (None = not traced).
 
     `source`: web | compare | mcp | eval. `eval_tier` routes the trace to the eval project.
@@ -93,7 +94,7 @@ def run_config(source: str, *, eval_tier: str | None = None, tags: tuple[str, ..
     from langchain_core.tracers import LangChainTracer
 
     from src.llm import model_id
-    run_id = uuid.uuid4()
+    run_id = run_id or uuid.uuid4()          # callers pass their own id so feedback can find the trace
     project = EVAL_PROJECT if eval_tier else PROJECT
     all_tags = [source, *([f"eval:{eval_tier}"] if eval_tier else []), *tags]
     md = {"source": source, "model": model_id(), **({"eval_tier": eval_tier} if eval_tier else {}), **(metadata or {})}

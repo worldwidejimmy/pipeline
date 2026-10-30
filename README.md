@@ -313,6 +313,24 @@ attacks, the subtle ones repeated, graded on what the attack achieved):
 
 ---
 
+## Feedback flywheel: 👍/👎 → eval cases
+
+Every answer has a server-issued id (also its LangSmith run id when traced). A vote
+carries only that id, so the server records what it *actually* asked and answered;
+a client can't inject text. Votes are:
+- stored redacted, with a hashed IP
+- attached to the trace as `user_rating`
+- shown on `/admin`
+
+`make feedback-triage` drafts eval cases from the 👎 votes. A human reviews each one
+before it enters the (public) datasets.
+
+The first real 👎 came from testing the loop itself: "Who directed Heat?" answered about
+*WWE Heat*, because TMDB ranks the 1998 wrestling show above the 1995 film and the agent
+took the first result. Fixed (best-match scoring), with a canary so it stays fixed.
+
+---
+
 ## A reranker we measured and didn't ship
 
 Cross-encoder reranking is the textbook RAG upgrade, so it was tested properly. Tuned on

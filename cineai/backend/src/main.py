@@ -29,7 +29,9 @@ from src.graph.pipeline import build_pipeline, CineState, _get_memory
 from src.tools import tmdb_client
 from src import usage
 from src.llm import text_of
-from src import guardrails, mcp_server
+import uuid
+
+from src import feedback, guardrails, mcp_server
 from src.compare import compare_stream
 
 app = FastAPI(title="SmartMovieSearch", version="2.0.0")
@@ -118,7 +120,11 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
     IP is never put into the trace.
     """
     pipeline = build_pipeline()
-    trace_cfg, run_id = tracing.run_config(**(trace or {"source": "web"}))
+    # One id per answer, traced or not: the LangSmith run id when sampled, and the key
+    # 👍/👎 feedback refers to (src/feedback.py).
+    request_id = uuid.uuid4()
+    trace_cfg, traced_id = tracing.run_config(**(trace or {"source": "web"}), run_id=request_id)
+    run_id = str(request_id)
     config   = {"configurable": {"thread_id": thread_id}, **trace_cfg}
 
     # Load existing history from checkpointer so agents have context
@@ -144,12 +150,15 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
     # allow-list once the search agent finishes (before synthesis starts).
     search_urls: list[str] = []
     link_guards: dict[str, guardrails.LinkGuard] = {}
+    final_parts: list[str] = []     # the answer exactly as streamed (post-guard), for feedback
+    routing: str | None = None
 
     yield _sse("pipeline_start", {
         "question":    question,
         "thread_id":   thread_id,
         "turn_number": len(history) + 1,
-        "run_id":      run_id,          # trace id (None when not sampled), for feedback
+        "run_id":      run_id,          # answer id: feedback key (+ LangSmith run id when traced)
+        "traced":      traced_id is not None,
     })
 
     try:
@@ -232,6 +241,8 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
                     guard = link_guards.setdefault(event.get("run_id", ""), guardrails.LinkGuard(search_urls))
                     content = guard.feed(content)
                 if content:
+                    if synthesis_streaming:
+                        final_parts.append(content)
                     yield _sse("token", {
                         "content":  content,
                         "agent":    current_agent,
@@ -242,6 +253,8 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
                 guard = link_guards.pop(event.get("run_id", ""), None)
                 rest = guard.flush() if guard else ""
                 if rest:
+                    if synthesis_streaming:
+                        final_parts.append(rest)
                     yield _sse("token", {"content": rest, "agent": current_agent, "is_final": synthesis_streaming})
                 output = data.get("output")
                 # usage_metadata is a TypedDict (dict at runtime) on modern
@@ -318,7 +331,12 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
 
     usage.add_tokens(total_prompt_tokens, total_completion_tokens, ip=client_ip)
     total_ms = int(time.time() * 1000) - start_ms
+    if final_parts:
+        from src.llm import model_id
+        feedback.remember(run_id, question=question, answer="".join(final_parts), route=routing,
+                          model=model_id(), traced=traced_id is not None)
     yield _sse("done", {
+        "run_id":                  run_id,
         "total_latency_ms":        total_ms,
         "total_prompt_tokens":     total_prompt_tokens,
         "total_completion_tokens": total_completion_tokens,
@@ -824,6 +842,30 @@ async def admin_mcp(request: Request):
     """MCP usage from the audit log: per-day calls, errors, distinct callers (hashed)."""
     _require_admin(request)
     return mcp_server.stats()
+
+
+class _FeedbackRequest(BaseModel):
+    run_id: str
+    rating: int
+    comment: str = ""
+
+
+@app.post("/api/feedback")
+async def post_feedback(body: _FeedbackRequest, request: Request):
+    """PUBLIC: 👍/👎 on an answer this server just gave (by its run id; see src/feedback.py)."""
+    ip = usage.client_ip(request)
+    if usage.is_blacklisted(ip):
+        raise HTTPException(status_code=403, detail="forbidden")
+    try:
+        return feedback.submit(body.run_id, body.rating, body.comment, mcp_server.hash_ip(ip))
+    except feedback.FeedbackError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/admin/feedback")
+async def admin_feedback(request: Request):
+    _require_admin(request)
+    return feedback.summary()
 
 
 @app.get("/api/admin/tracing")

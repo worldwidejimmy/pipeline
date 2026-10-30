@@ -12,6 +12,7 @@ import { RoutingRulesModal } from './components/RoutingRulesModal'
 import { PasswordGate } from './components/PasswordGate'
 import { UsageBadge } from './components/UsageBadge'
 import { CompareView } from './components/CompareView'
+import { FeedbackBar } from './components/FeedbackBar'
 import { getAccessToken, clearAccessToken, apiFetch, makeSSEUrl, fetchUsage } from './api'
 
 const EXAMPLE_QUERIES = [
@@ -28,6 +29,7 @@ type ObsTab = 'graph' | 'timeline' | 'events' | 'context'
 interface Turn {
   q: string
   a: string
+  runId?: string     // server's answer id, for 👍/👎 (absent for compare turns)
 }
 
 function generateThreadId(): string {
@@ -163,6 +165,7 @@ export default function App() {
     esRef.current = es
 
     let currentAnswer = ''
+    let runId: string | undefined
 
     const addEvent = (type: string, e: MessageEvent) => {
       try {
@@ -171,7 +174,10 @@ export default function App() {
       } catch { /* ignore parse errors */ }
     }
 
-    es.addEventListener('pipeline_start',   e => { addEvent('pipeline_start', e); setTurnNum(p => p + 1) })
+    es.addEventListener('pipeline_start',   e => {
+      addEvent('pipeline_start', e); setTurnNum(p => p + 1)
+      try { runId = JSON.parse(e.data).run_id ?? undefined } catch { /* older backend */ }
+    })
     es.addEventListener('agent_start',      e => addEvent('agent_start', e))
     es.addEventListener('agent_end',        e => addEvent('agent_end', e))
     es.addEventListener('routing_decision', e => addEvent('routing_decision', e))
@@ -210,7 +216,7 @@ export default function App() {
       setStream(false)
       es.close()
       if (currentAnswer) {
-        setHistory(prev => [...prev, { q: q.trim(), a: currentAnswer }])
+        setHistory(prev => [...prev, { q: q.trim(), a: currentAnswer, runId }])
         setAnswer('')  // the turn lives in history now — keeping it would render twice
       }
       refreshUsage()
@@ -586,6 +592,7 @@ export default function App() {
               <div className="history-a answer-content">
                 <ReactMarkdown>{turn.a}</ReactMarkdown>
               </div>
+              {turn.runId && <FeedbackBar key={turn.runId} runId={turn.runId} />}
             </div>
           ))}
 

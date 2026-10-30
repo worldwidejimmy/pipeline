@@ -163,6 +163,7 @@ Order, each shipped as code → tests/evals → docs → commit → push:
    traffic first; static/dynamic system blocks; −25% $/query on T4.
 6. ✅ **Reranker: measured, not shipped** (2026-10-30). Held-out MRR +0.05, no extra documents
    found, +190 ms CPU. Added 14 held-out T2 cases; see `evals/experiments/README.md`.
-7. **Answer feedback** (👍/👎) feeding the eval datasets.
+7. ✅ **Answer feedback** (2026-10-30): 👍/👎 by server-issued id, redacted, onto LangSmith traces;
+   `make feedback-triage` drafts eval cases for human review. Its first 👎 found the WWE Heat bug.
 8. **Structured outputs**: ✅ intent extraction (pulled forward: it was the root cause of a
    live bug); supervisor routing still to do.

@@ -1,6 +1,7 @@
 """TMDB API client — async wrapper around The Movie Database REST API."""
 from __future__ import annotations
 
+import re
 import time
 from typing import Any
 
@@ -40,6 +41,32 @@ def _fmt_movie(m: dict) -> dict:
         "genres": [g["name"] for g in m.get("genres", [])],
         "media_type": m.get("media_type", "movie"),
     }
+
+
+def _norm_title(t: str | None) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (t or "").lower()).strip()
+
+
+def best_match(results: list[dict], query: str, year: int | str | None = None) -> dict | None:
+    """The search result the user most likely meant, NOT simply TMDB's first.
+
+    /search/multi orders by popularity, so "Heat" returned "WWE Heat" (a 1998 TV show)
+    above Heat (1995), and the agent answered about the wrong title. That was the first
+    real 👎 through the feedback loop, 2026-10-30. Scoring: exact title +4, a matching
+    year +2, title starting with the query +1; ties go to vote count, then to TMDB's order.
+    """
+    if not results:
+        return None
+    q = _norm_title(query)
+    y = str(year) if year else None
+
+    def score(item: tuple[int, dict]) -> tuple:
+        i, r = item
+        t = _norm_title(r.get("title"))
+        s = 4 * (t == q) + 2 * bool(y and r.get("year") == y) + 1 * (t.startswith(q) and t != q)
+        return (s, r.get("vote_count") or 0, -i)
+
+    return max(enumerate(results), key=score)[1]
 
 
 async def search_movies(query: str, page: int = 1) -> dict[str, Any]:

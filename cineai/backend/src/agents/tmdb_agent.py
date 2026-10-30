@@ -181,7 +181,7 @@ async def tmdb_agent_node(state: dict) -> dict:
 
         movie_detail: dict = {}
         if movie_search["results"]:
-            top = movie_search["results"][0]
+            top = tmdb_client.best_match(movie_search["results"], movie_query, intent.get("year"))
             if top.get("id"):
                 movie_detail = await tmdb_client.get_movie_details(
                     top["id"], top.get("media_type", "movie")
@@ -224,8 +224,8 @@ async def tmdb_agent_node(state: dict) -> dict:
                 "_tmdb_raw": search_result,
             }
 
-        # If we got a specific movie, fetch its full details
-        top = search_result["results"][0]
+        # If we got a specific movie, fetch its full details (best match, not TMDB's first)
+        top = tmdb_client.best_match(search_result["results"], query, intent.get("year"))
         if top.get("id"):
             detail = await tmdb_client.get_movie_details(
                 top["id"], top.get("media_type", "movie")
@@ -235,7 +235,7 @@ async def tmdb_agent_node(state: dict) -> dict:
             # detail's crew — the director — was being truncated away. Found by the
             # T4 "inception" canary (evals/datasets/canaries.jsonl).
             others = [{k: r.get(k) for k in ("id", "title", "year", "rating", "media_type")}
-                      for r in search_result.get("results", [])[1:5]]
+                      for r in search_result.get("results", []) if r is not top][:4]
             tmdb_data = {"detail": detail, "other_matches": others}
 
     # Step 3: Generate grounded answer
