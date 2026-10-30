@@ -5,7 +5,7 @@ coherent answer. Maintains conversation history in state.
 from __future__ import annotations
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from src.llm import get_chat, text_of
+from src.llm import get_chat, static_part, system_blocks, text_of
 
 from src.config import get_config
 from src.guardrails import UNTRUSTED_RULE, wrap_untrusted
@@ -33,6 +33,8 @@ suggest they try a different query (check spelling, try a related title or actor
 Agent Outputs:
 {agent_outputs}
 """ + UNTRUSTED_RULE
+
+_SYSTEM_STATIC = static_part(_SYSTEM, "{history_note}", UNTRUSTED_RULE)   # cached prefix
 
 _HISTORY_NOTE = """
 The user has asked follow-up questions before. Keep your answer focused on what's new —
@@ -69,12 +71,9 @@ async def synthesise_node(state: dict) -> dict:
     llm = _get_llm()
 
     response = await llm.ainvoke([
-        SystemMessage(content=_SYSTEM.format(
-            # Agent reports are model-written but built from third-party data, so they
-            # are spotlighted too: a second chance to drop anything injected upstream.
-            agent_outputs=wrap_untrusted("agent_reports", combined),
-            history_note=history_note,
-        )),
+        # Agent reports are model-written but built from third-party data, so they are
+        # spotlighted too: a second chance to drop anything injected upstream.
+        system_blocks(_SYSTEM_STATIC, f"{history_note}\nAgent Outputs:\n" + wrap_untrusted("agent_reports", combined)),
         HumanMessage(content=f"Question: {question}"),
     ])
 

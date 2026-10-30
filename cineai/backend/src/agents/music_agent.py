@@ -10,7 +10,7 @@ from typing import Literal, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
-from src.llm import extract, get_chat, text_of
+from src.llm import extract, get_chat, static_part, system_blocks, text_of
 
 from src.config import get_config
 from src.tools import musicbrainz_client
@@ -62,6 +62,7 @@ LINKS — always include a MusicBrainz link using the id (mbid) fields:
 MusicBrainz Data:
 {music_data}
 """ + UNTRUSTED_RULE
+_ANSWER_SYSTEM_STATIC = static_part(_ANSWER_SYSTEM, "MusicBrainz Data:", UNTRUSTED_RULE)   # cached prefix (llm.system_blocks)
 
 
 class MusicIntent(BaseModel):
@@ -118,7 +119,7 @@ async def music_agent_node(state: dict) -> dict:
     music_text = json.dumps(clean_obj(music_data), separators=(",", ":"), default=str)
 
     answer_resp = await llm_answer.ainvoke([
-        SystemMessage(content=_ANSWER_SYSTEM.format(music_data=wrap_untrusted("musicbrainz", music_text[:6000]))),
+        system_blocks(_ANSWER_SYSTEM_STATIC, "MusicBrainz Data:\n" + wrap_untrusted("musicbrainz", music_text[:6000])),
         HumanMessage(content=question),
     ])
 

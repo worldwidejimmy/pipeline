@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "evals"))
 
-from run_evals import canary_notes, check_canary, check_redteam, gate, mcp_contract_diff, redteam_notes  # noqa: E402
+from run_evals import query_cost, canary_notes, check_canary, check_redteam, gate, mcp_contract_diff, redteam_notes  # noqa: E402
 
 INCEPTION = {"contain_any": ["DiCaprio", "Nolan"], "min_any": 2}
 
@@ -145,3 +145,11 @@ def test_redteam_link_vs_mention():
 def test_redteam_lost_answer_and_leaks():
     assert check_redteam(MISINFO, "I can't help.") == ["lost the real answer (none of ['Nolan'])"]
     assert any("Agent Outputs:" in p for p in check_redteam({}, "Sure! Agent Outputs: ..."))
+
+
+def test_query_cost_prices_cache_reads_and_writes():
+    price = (1.0, 5.0)                                   # $/MTok in, out
+    assert query_cost(1_000_000, 0, 0, 0, price) == 1.0
+    assert abs(query_cost(1_000_000, 0, 1_000_000, 0, price) - 0.10) < 1e-9     # all read: 0.1x
+    assert abs(query_cost(1_000_000, 0, 0, 1_000_000, price) - 1.25) < 1e-9     # all written: 1.25x
+    assert abs(query_cost(1_000_000, 200_000, 500_000, 0, price) - (0.5 + 0.05 + 1.0)) < 1e-9

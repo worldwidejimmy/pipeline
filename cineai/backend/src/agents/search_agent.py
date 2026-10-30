@@ -5,7 +5,7 @@ from current entertainment news and reviews.
 from __future__ import annotations
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from src.llm import get_chat, text_of
+from src.llm import get_chat, static_part, system_blocks, text_of
 
 from src.config import get_config
 from src.tools.web_search import web_search
@@ -20,6 +20,7 @@ Focus on recent, factual information. Do not invent details.
 Search Results:
 {results}
 """ + UNTRUSTED_RULE
+_SYSTEM_STATIC = static_part(_SYSTEM, "Search Results:", UNTRUSTED_RULE)   # cached prefix (llm.system_blocks)
 
 
 def _get_llm():
@@ -45,7 +46,7 @@ async def search_agent_node(state: dict) -> dict:
 
     llm = _get_llm()
     response = await llm.ainvoke([
-        SystemMessage(content=_SYSTEM.format(results=wrap_untrusted("web_search", formatted[:5000]))),
+        system_blocks(_SYSTEM_STATIC, "Search Results:\n" + wrap_untrusted("web_search", formatted[:5000])),
         HumanMessage(content=question),
     ])
 

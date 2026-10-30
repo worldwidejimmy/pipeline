@@ -135,6 +135,8 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
     agent_start_times: dict[str, int] = {}
     total_prompt_tokens: int = 0
     total_completion_tokens: int = 0
+    cache_read_tokens: int = 0       # subsets of total_prompt_tokens (prompt caching)
+    cache_write_tokens: int = 0
     agents_used: list[str] = []
     synthesis_streaming = False
     # Output link allow-list (src/guardrails.py): one LinkGuard per LLM run, keyed by
@@ -254,6 +256,9 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
                     compl_t  = getattr(um, "output_tokens", 0) or 0
                 total_prompt_tokens     += prompt_t
                 total_completion_tokens += compl_t
+                details = (um.get("input_token_details") if isinstance(um, dict) else None) or {}
+                cache_read_tokens  += details.get("cache_read", 0) or 0
+                cache_write_tokens += details.get("cache_creation", 0) or 0
                 yield _sse("llm_end", {
                     "agent":             current_agent,
                     "prompt_tokens":     prompt_t,
@@ -317,6 +322,8 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
         "total_latency_ms":        total_ms,
         "total_prompt_tokens":     total_prompt_tokens,
         "total_completion_tokens": total_completion_tokens,
+        "cache_read_tokens":       cache_read_tokens,
+        "cache_write_tokens":      cache_write_tokens,
         "agents_used":             list(dict.fromkeys(agents_used)),
     })
 

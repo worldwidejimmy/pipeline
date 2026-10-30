@@ -59,6 +59,17 @@ PRICES = {
     "claude-opus-5-5": (4.0, 20.0), "claude-haiku-4-5": (1.0, 5.0),
     "claude-sonnet-4-6": (3.0, 15.0), "claude-opus-4-8": (5.0, 25.0),
 }
+# Prompt-caching multipliers on the input price (Anthropic): a cache write costs 1.25x,
+# a cache read 0.1x. Cached tokens are counted inside the input total.
+CACHE_WRITE_X, CACHE_READ_X = 1.25, 0.10
+
+
+def query_cost(tin: int, tout: int, read: int, write: int, price: tuple[float, float]) -> float:
+    """$ for one query, pricing cache reads/writes correctly. Pure — unit-tested."""
+    uncached = max(0, tin - read - write)
+    return ((uncached + write * CACHE_WRITE_X + read * CACHE_READ_X) * price[0] + tout * price[1]) / 1e6
+
+
 # Phrases that mean a known-answerable canary failed — the fenced-JSON weeks read like this.
 FAIL_PHRASES = ["couldn't find", "could not find", "wasn't able to find", "unable to find",
                 "don't have information", "no information about"]
@@ -278,6 +289,8 @@ async def run_canaries(verbose: bool) -> tuple[dict, dict]:
                      "route": route, "ms": done.get("total_latency_ms") or int((time.time() - t0) * 1000),
                      "tokens_in": done.get("total_prompt_tokens", 0),
                      "tokens_out": done.get("total_completion_tokens", 0),
+                     "cache_read": done.get("cache_read_tokens", 0),
+                     "cache_write": done.get("cache_write_tokens", 0),
                      "answer_head": answer[:300],
                      # full text on failure so the cause is visible after the fact
                      **({"answer": answer[:6000]} if problems else {})})
@@ -297,14 +310,18 @@ async def run_canaries(verbose: bool) -> tuple[dict, dict]:
     tin = [r["tokens_in"] for r in rows]
     tout = [r["tokens_out"] for r in rows]
     price = next((v for k, v in PRICES.items() if model.startswith(k)), None)
-    cost = (statistics.mean(tin) * price[0] + statistics.mean(tout) * price[1]) / 1e6 if price and rows else None
+    cost = statistics.mean(query_cost(r["tokens_in"], r["tokens_out"], r.get("cache_read", 0), r.get("cache_write", 0), price)
+                           for r in rows) if price and rows else None
+    cache_hit = round(sum(r.get("cache_read", 0) for r in rows) / max(1, sum(tin)), 3) if rows else None
     t5 = {"tier": "t5", "name": "cost & latency", "at": _now(), "n": n,
           "p50_ms": int(statistics.median(lat)) if lat else None,
           "p95_ms": lat[min(n - 1, int(round(0.95 * (n - 1))))] if lat else None,
           "tokens_per_query": int(statistics.mean([a + b for a, b in zip(tin, tout)])) if rows else None,
           "usd_per_query": round(cost, 5) if cost is not None else None,
+          "cache_hit_rate": cache_hit,     # share of input tokens served from the prompt cache
           "headline": (f"p50 {statistics.median(lat)/1000:.1f}s · "
                        f"{int(statistics.mean([a + b for a, b in zip(tin, tout)]))} tok/q"
+                       + (f" · {cache_hit:.0%} cached" if cache_hit else "")
                        + (f" · ${cost:.4f}/q" if cost is not None else "")) if rows else "no runs"}
     return t4, t5
 

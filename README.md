@@ -313,6 +313,21 @@ attacks, the subtle ones repeated, graded on what the attack achieved):
 
 ---
 
+## Prompt caching: measured, then applied
+
+Every agent's system prompt is two blocks: fixed instructions first (cache-marked), then
+the request's data. Before building it, the threshold and the traffic were measured:
+- Haiku 5.5 caches prefixes from roughly 512–720 tokens up. The fixed instructions here
+  are 280–980 tokens, so the larger ones qualify.
+- Caching pays when a prefix is reused twice within the 5-minute TTL (a write costs 1.25×,
+  a read 0.1×). That is true of the eval workload, where most of the spend is.
+
+**Result on the identical canary set:** $0.0012 → $0.0009 per question (−25%), with 36–49%
+of input tokens served from cache, and quality and red-team results unchanged. The T5
+tier now prices cache reads and writes correctly and reports the cache hit rate.
+
+---
+
 ## Observability with LangSmith
 
 Tracing is explicit, not ambient (`cineai/backend/src/tracing.py`):

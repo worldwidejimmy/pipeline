@@ -147,6 +147,30 @@ def get_chat(*, temperature: float = 0.1, max_tokens: int = 1024,
     return ChatAnthropic(**kwargs)
 
 
+def system_blocks(static: str, dynamic: str = "") -> Any:
+    """A SystemMessage as [fixed instructions, cache-marked] + [this request's data].
+
+    Prompt caching, measured 2026-10-30: Haiku 5.5 caches a prefix from ~512-720 tokens
+    up (379 didn't, 721 did); 5-minute TTL; a write costs 1.25x input, a read 0.1x. So
+    it pays when a prefix is reused twice within 5 minutes. That's true for the nightly
+    evals (most of our spend; 92% of runs have another within 5 min) and for bursts of
+    visitors. Shorter prefixes are silently not cached (no error, no write cost).
+    The instructions must come FIRST and be byte-identical across calls, so nothing
+    per-request (data, history, dates) may go in `static`.
+    """
+    from langchain_core.messages import SystemMessage
+    blocks: list[dict] = [{"type": "text", "text": static, "cache_control": {"type": "ephemeral"}}]
+    if dynamic:
+        blocks.append({"type": "text", "text": dynamic})
+    return SystemMessage(content=blocks)
+
+
+def static_part(template: str, marker: str, *suffix: str) -> str:
+    """The fixed instructions of a prompt template: everything before `marker` (where the
+    per-request data starts), with {{escapes}} resolved, plus any fixed `suffix` text."""
+    return template[:template.index(marker)].format() + "".join(suffix)
+
+
 async def extract(schema: Any, system: str, user: str, *, max_tokens: int = 256) -> dict | None:
     """Structured extraction with Claude's native structured outputs (JSON schema).
 
@@ -156,10 +180,10 @@ async def extract(schema: Any, system: str, user: str, *, max_tokens: int = 256)
     2026-10-30). Returns a plain dict, or None if the call or validation fails (callers
     keep their own fallback).
     """
-    from langchain_core.messages import HumanMessage, SystemMessage
+    from langchain_core.messages import HumanMessage
     try:
         llm = get_chat(temperature=0.0, max_tokens=max_tokens).with_structured_output(schema, method="json_schema")
-        out = await llm.ainvoke([SystemMessage(content=system), HumanMessage(content=user)])
+        out = await llm.ainvoke([system_blocks(system), HumanMessage(content=user)])
         return out.model_dump() if hasattr(out, "model_dump") else dict(out)
     except Exception as exc:
         print(f"[llm.extract] {getattr(schema, '__name__', 'schema')} failed: {type(exc).__name__}: {str(exc)[:160]}")

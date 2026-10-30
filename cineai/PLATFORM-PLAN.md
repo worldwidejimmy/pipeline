@@ -159,7 +159,8 @@ Order, each shipped as code → tests/evals → docs → commit → push:
    an output link allow-list and structured extraction. See README → Guardrails.
 4. ✅ **CI on GitHub** (2026-10-30): privacy guard + identity check, unit tests and a typecheck
    on every push/PR; GitHub secret scanning + push protection; CI and eval badges.
-5. **Prompt caching**: on the large system prompts, measured with T5.
+5. ✅ **Prompt caching** (2026-10-30): measured the threshold (~512–720 tok on Haiku 5.5) and the
+   traffic first; static/dynamic system blocks; −25% $/query on T4.
 6. **Reranker** in RAG, with a before/after on T2.
 7. **Answer feedback** (👍/👎) feeding the eval datasets.
 8. **Structured outputs**: ✅ intent extraction (pulled forward: it was the root cause of a

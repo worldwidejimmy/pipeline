@@ -644,6 +644,18 @@ MCP apps, everything else to FastAPI. The frontend nginx proxies those paths to 
 - README badges: CI status, and `GET /api/evals/badge` (shields.io endpoint; a tier that's
   stale counts as not passing).
 
+## Prompt caching (2026-10-30)
+
+`llm.system_blocks(static, dynamic)` builds every agent's system prompt: cache-marked fixed
+instructions, then the request's data. `static_part(template, marker, …)` cuts a template's
+instructions off at the point where its data begins.
+- **Never put per-request text in `static`** (data, history, dates, ids): it would silently
+  turn every call into a cache write at 1.25×.
+- Measured: Haiku 5.5's minimum cacheable prefix is ~512–720 tokens (379 didn't cache, 721
+  did). RAG (306) and search (282) are below it, so they're marked but never cached.
+- T5 (`run_evals.query_cost`) prices cache writes at 1.25× and reads at 0.1×, and reports
+  `cache_hit_rate`. A/B on T4: $0.0012 → $0.0009 per query, 36–49% cached.
+
 ## Guardrails (prompt injection, 2026-10-30)
 
 `src/guardrails.py`; measured by T7 (`evals/datasets/redteam.jsonl`).

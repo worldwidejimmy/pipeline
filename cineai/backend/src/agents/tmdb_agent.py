@@ -15,7 +15,7 @@ from typing import Literal, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
-from src.llm import extract, get_chat, text_of
+from src.llm import extract, get_chat, static_part, system_blocks, text_of
 
 from src.config import get_config
 from src.tools import tmdb_client
@@ -91,6 +91,7 @@ LINKS — always include a TMDB link for the main title(s) using the id and medi
 TMDB Data:
 {tmdb_data}
 """ + UNTRUSTED_RULE
+_ANSWER_SYSTEM_STATIC = static_part(_ANSWER_SYSTEM, "TMDB Data:", UNTRUSTED_RULE)   # cached prefix (llm.system_blocks)
 
 # TMDB genre name → ID mapping (top genres)
 _GENRE_MAP = {
@@ -246,7 +247,7 @@ async def tmdb_agent_node(state: dict) -> dict:
     char_limit = 9000 if search_type in ("movie_and_person", "title_and_person") else 6000
 
     answer_resp = await llm_answer.ainvoke([
-        SystemMessage(content=_ANSWER_SYSTEM.format(tmdb_data=wrap_untrusted("tmdb", tmdb_text[:char_limit]))),
+        system_blocks(_ANSWER_SYSTEM_STATIC, "TMDB Data:\n" + wrap_untrusted("tmdb", tmdb_text[:char_limit])),
         HumanMessage(content=question),
     ])
 

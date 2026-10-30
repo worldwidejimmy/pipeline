@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from src.llm import get_chat, text_of
+from src.llm import get_chat, system_blocks, text_of
 
 from src.config import get_config
 
@@ -57,6 +57,8 @@ Classify the user's question into exactly one of these routing decisions:
 Reply with ONLY the routing decision word(s). No explanation. No punctuation.
 Examples: "tmdb" or "tmdb+rag" or "all"
 """
+
+_SYSTEM_STATIC = _SYSTEM.replace("{history_block}\n", "")
 
 _HISTORY_BLOCK = """Conversation so far (most recent first):
 {turns}
@@ -113,11 +115,11 @@ async def supervisor_route_node(state: dict) -> dict:
     else:
         history_block = ""
 
-    system = _SYSTEM.format(history_block=history_block)
     llm = _get_llm()
 
+    # Instructions cached (identical every call); the per-user history goes after them.
     response = await llm.ainvoke([
-        SystemMessage(content=system),
+        system_blocks(_SYSTEM_STATIC, history_block),
         HumanMessage(content=question),
     ])
 
