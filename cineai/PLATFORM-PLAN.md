@@ -157,8 +157,8 @@ Order, each shipped as code → tests/evals → docs → commit → push:
    sampling, and run ids for feedback (`src/tracing.py`).
 3. ✅ **Guardrails + red-team eval tier** (2026-10-30): measured first (T7), then spotlighting,
    an output link allow-list and structured extraction. See README → Guardrails.
-4. **CI on GitHub**: unit tests plus a server-side copy of the privacy guard on every
-   push/PR (the local hooks don't run on web merges), and an eval badge.
+4. ✅ **CI on GitHub** (2026-10-30): privacy guard + identity check, unit tests and a typecheck
+   on every push/PR; GitHub secret scanning + push protection; CI and eval badges.
 5. **Prompt caching**: on the large system prompts, measured with T5.
 6. **Reranker** in RAG, with a before/after on T2.
 7. **Answer feedback** (👍/👎) feeding the eval datasets.

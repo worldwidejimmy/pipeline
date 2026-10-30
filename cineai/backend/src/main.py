@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import AsyncIterator
 
@@ -764,6 +765,26 @@ async def evals_summary():
         tiers.append({"tier": t, "name": r.get("name"), "status": r.get("status"),
                       "headline": headline, "at": r.get("at"), "model": r.get("model")})
     return {"updated": latest.get("updated"), "model": latest.get("model"), "tiers": tiers}
+
+
+@app.get("/api/evals/badge")
+async def evals_badge():
+    """PUBLIC: shields.io endpoint badge for the README ("evals: 7/7 passing").
+    Built from the same allow-listed fields as /api/evals/summary; stale runs (>36h,
+    the weekly judge >8d) count as not passing, so the badge can't stay green on a dead cron."""
+    s = await evals_summary()
+    now = time.time()
+    ok = 0
+    for t in s["tiers"]:
+        try:
+            age_h = (now - datetime.fromisoformat(t["at"]).timestamp()) / 3600
+        except (TypeError, ValueError):
+            age_h = 1e9
+        ok += t["status"] == "pass" and age_h <= (8 * 24 if t["tier"] == "t3" else 36)
+    n = len(s["tiers"])
+    color = "brightgreen" if n and ok == n else ("orange" if ok else "red")
+    return {"schemaVersion": 1, "label": "evals (nightly)", "message": f"{ok}/{n} tiers passing" if n else "no runs",
+            "color": color, "cacheSeconds": 3600}
 
 
 @app.get("/api/admin/evals")

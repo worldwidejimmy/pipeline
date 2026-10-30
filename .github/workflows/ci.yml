@@ -1,0 +1,94 @@
+# CI for the public repo: the same privacy guard the local git hooks run, but on
+# GitHub's side, so it also covers pushes from other clones and PRs merged in the
+# web UI (local hooks never see those), plus the unit tests and a typecheck.
+#
+# The private patterns (names/domains/IPs that must never be published) are NOT in
+# this repo. They come from the SMS_PRIVATE_PATTERNS secret (one regex per line), and
+# the approved author identity from SMS_APPROVED_IDENTITY. Without them (e.g. fork
+# PRs, which get no secrets) the guard still runs its generic checks and warns.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  privacy-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Load private patterns + approved identity (from secrets)
+        env:
+          PATTERNS: ${{ secrets.SMS_PRIVATE_PATTERNS }}
+          IDENTITY: ${{ secrets.SMS_APPROVED_IDENTITY }}
+        run: |
+          mkdir -p ~/.config/sms-repo-guard
+          if [ -n "$PATTERNS" ]; then
+            printf '%s\n' "$PATTERNS" > ~/.config/sms-repo-guard/patterns.txt
+            # Belt and braces: never let a pattern itself appear in a public log.
+            while IFS= read -r p; do
+              case "$p" in ''|'#'*) ;; *) echo "::add-mask::$p" ;; esac
+            done <<< "$PATTERNS"
+          else
+            echo "::warning::SMS_PRIVATE_PATTERNS not available: generic secret/PII checks only"
+          fi
+          if [ -n "$IDENTITY" ]; then printf '%s\n' "$IDENTITY" > ~/.config/sms-repo-guard/identity.txt; fi
+      - name: Full-tree scan (secrets, PII, forbidden files, private patterns)
+        run: scripts/privacy-audit.sh
+      - name: Commit identities in this push / PR
+        env:
+          BEFORE: ${{ github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ -n "$BASE" ]; then range="$BASE..$HEAD"
+          elif [ -n "$BEFORE" ] && ! [[ "$BEFORE" =~ ^0+$ ]] && git cat-file -e "$BEFORE" 2>/dev/null; then range="$BEFORE..$HEAD"
+          else range="$HEAD~1..$HEAD"; fi
+          idents=$(git log --format='%an <%ae>%n%cn <%ce>' "$range" | sort -u)
+          fail=0
+          if printf '%s\n' "$idents" | grep -E 'ubuntu@|root@|@vps|\.vps\.ovh\.|localhost'; then
+            echo "::error::box-default identity on a commit in $range"; fail=1
+          fi
+          f=~/.config/sms-repo-guard/identity.txt
+          if [ -f "$f" ]; then
+            unapproved=$(printf '%s\n' "$idents" | grep -vFx -- "$(head -1 "$f")" | grep -vFx 'GitHub <noreply@github.com>' || true)
+            if [ -n "$unapproved" ]; then echo "::error::unapproved commit identity in $range"; fail=1; fi
+          fi
+          exit $fail
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: "3.11"
+      # Same dependency set as `make test-unit`: the tests stub the heavy runtime deps
+      # (Milvus, LangChain, API clients), so no keys or services are needed.
+      - run: pip install fastapi pytest "mcp==2.3.0" "PyJWT[crypto]>=2.10.0"
+      - run: python -m pytest -q tests/
+        working-directory: cineai/backend
+
+  frontend-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: cineai/frontend/package-lock.json
+      - run: npm ci
+        working-directory: cineai/frontend
+      - run: npx tsc --noEmit -p .
+        working-directory: cineai/frontend

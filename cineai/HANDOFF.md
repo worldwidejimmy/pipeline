@@ -628,6 +628,22 @@ MCP apps, everything else to FastAPI. The frontend nginx proxies those paths to 
 - **Try it:** `claude mcp add --transport http smartmoviesearch https://smartmoviesearch.com/mcp`,
   or the MCP Inspector against the same URL.
 
+## CI + GitHub-side protection (2026-10-30)
+
+`.github/workflows/ci.yml` runs on every push to main and on every PR:
+- **privacy-guard:** the same `scripts/privacy-audit.sh` full-tree scan the local hooks use,
+  plus the commit-identity check. It covers what local hooks can't: pushes from other
+  clones and PRs merged in the GitHub UI. Private patterns come from the
+  `SMS_PRIVATE_PATTERNS` secret and the approved identity from `SMS_APPROVED_IDENTITY`
+  (both owner-set). Without them, only the generic checks run (with a warning). Fork PRs
+  never get secrets.
+- **unit-tests** (`backend/tests`, same deps as `make test-unit`) and **frontend-typecheck**.
+- Actions are pinned to commit SHAs. The workflow token is read-only.
+- GitHub **secret scanning + push protection** are on in the repo settings: a second,
+  independent secret detector that blocks the push itself.
+- README badges: CI status, and `GET /api/evals/badge` (shields.io endpoint; a tier that's
+  stale counts as not passing).
+
 ## Guardrails (prompt injection, 2026-10-30)
 
 `src/guardrails.py`; measured by T7 (`evals/datasets/redteam.jsonl`).
