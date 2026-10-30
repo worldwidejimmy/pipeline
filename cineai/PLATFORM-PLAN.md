@@ -165,5 +165,8 @@ Order, each shipped as code → tests/evals → docs → commit → push:
    found, +190 ms CPU. Added 14 held-out T2 cases; see `evals/experiments/README.md`.
 7. ✅ **Answer feedback** (2026-10-30): 👍/👎 by server-issued id, redacted, onto LangSmith traces;
    `make feedback-triage` drafts eval cases for human review. Its first 👎 found the WWE Heat bug.
-8. **Structured outputs**: ✅ intent extraction (pulled forward: it was the root cause of a
-   live bug); supervisor routing still to do.
+8. ✅ **Structured outputs** (2026-10-30), measured per call. Intent extraction uses them: they
+   fixed a live bug (prose instead of JSON). Supervisor routing tried and **reverted**: +34%
+   input tokens on that call (the schema is injected), no accuracy gain (the text parser never
+   failed in T1), and one route shifted. The duplicate JSON templates were trimmed from the
+   extraction prompts (−165 tokens).

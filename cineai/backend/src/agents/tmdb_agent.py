@@ -22,17 +22,7 @@ from src.tools import tmdb_client
 from src.guardrails import UNTRUSTED_RULE, clean_obj, wrap_untrusted
 
 _EXTRACT_SYSTEM = """Extract structured search intent from the user's movie/TV question.
-
-Respond with JSON only (no markdown, no explanation):
-{
-  "search_type": "search_title" | "trending" | "discover" | "search_person" | "title_and_person",
-  "query": "<movie or TV show title, or null>",
-  "person": "<actor/director name when comparing against their filmography, or null>",
-  "genre": "<genre name or null>",
-  "year": <year as integer or null>,
-  "sort_by": "popularity.desc" | "vote_average.desc" | "release_date.desc" | null,
-  "min_rating": <float 0-10 or null>
-}
+(The response schema defines the fields; leave a field null when it does not apply.)
 
 Use "title_and_person" when the question asks about a specific title AND wants to
 compare it against an actor's or director's broader filmography.

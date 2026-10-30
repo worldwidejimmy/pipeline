@@ -17,13 +17,7 @@ from src.tools import musicbrainz_client
 from src.guardrails import UNTRUSTED_RULE, clean_obj, wrap_untrusted
 
 _EXTRACT_SYSTEM = """Extract structured music search intent from the user's question.
-
-Respond with JSON only (no markdown, no explanation):
-{
-  "search_type": "artist" | "album",
-  "artist": "<artist or band name, or null>",
-  "album": "<album or song title, or null>"
-}
+(The response schema defines the fields; leave a field null when it does not apply.)
 
 For questions about songwriting, lyrics, or who wrote a song — identify the artist
 associated with the song and use search_type "artist" to look up their details.

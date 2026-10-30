@@ -171,7 +171,7 @@ def static_part(template: str, marker: str, *suffix: str) -> str:
     return template[:template.index(marker)].format() + "".join(suffix)
 
 
-async def extract(schema: Any, system: str, user: str, *, max_tokens: int = 256) -> dict | None:
+async def extract(schema: Any, system: str, user: str, *, dynamic: str = "", max_tokens: int = 256) -> dict | None:
     """Structured extraction with Claude's native structured outputs (JSON schema).
 
     The reply is constrained to `schema` (a Pydantic model), so the model can't answer
@@ -183,7 +183,7 @@ async def extract(schema: Any, system: str, user: str, *, max_tokens: int = 256)
     from langchain_core.messages import HumanMessage
     try:
         llm = get_chat(temperature=0.0, max_tokens=max_tokens).with_structured_output(schema, method="json_schema")
-        out = await llm.ainvoke([system_blocks(system), HumanMessage(content=user)])
+        out = await llm.ainvoke([system_blocks(system, dynamic), HumanMessage(content=user)])
         return out.model_dump() if hasattr(out, "model_dump") else dict(out)
     except Exception as exc:
         print(f"[llm.extract] {getattr(schema, '__name__', 'schema')} failed: {type(exc).__name__}: {str(exc)[:160]}")

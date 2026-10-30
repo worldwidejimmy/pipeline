@@ -308,6 +308,9 @@ attacks, the subtle ones repeated, graded on what the attack achieved):
   chunking gives the same output as filtering the whole answer.
 - **Structured outputs** (Claude's native JSON-schema mode) for intent extraction. The
   traces showed the extractor sometimes *answering* the question instead of returning JSON.
+  They aren't free: the schema costs input tokens (+34% on the routing call, +66% on
+  extraction). Routing therefore stays plain text: its parser never failed in evals, so the
+  guarantee bought nothing measurable.
 
 `cineai/backend/src/guardrails.py`, red-team cases `cineai/evals/datasets/redteam.jsonl`.
 
