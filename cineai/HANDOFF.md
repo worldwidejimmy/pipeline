@@ -572,7 +572,7 @@ the 30/day cap. Every result records the model id.
 |---|---|---|---|
 | T0 | parse/contract fixtures, judge-label swap, model-param mapping, the eval gates themselves | $0 | `make test-unit` |
 | T1 | 48 routing questions → expected route (+acceptable alternates, ~20% holdout) | <$0.01 | `make eval-t1` |
-| T2 | 20 retrieval cases: hit@k, MRR, **content coverage** | ~$0 | `make eval-t2` |
+| T2 | 34 retrieval cases (14 `holdout`, never tuned on → `holdout_mrr`): hit@k, MRR, **content coverage**. Known miss: `wes-anderson-look` | ~$0 | `make eval-t2` |
 | T4 | 6 full-pipeline canaries: must-contain facts, must-not-say "couldn't find" | ~$0.01 | `make eval-t4` |
 | T5 | p50/p95 latency, tokens/query, $/query — from the T4 runs | $0 | (with T4) |
 | T6 | MCP interface: a real MCP client over HTTP checks the tool contract against `evals/fixtures/mcp_tools.json`, each tool on a known question, and that the Host/Origin guard refuses | ~$0 | `make eval-t6` |
@@ -594,6 +594,9 @@ the 30/day cap. Every result records the model id.
 - **Compare two models on the same evals:**
   `docker compose exec -T -e MODEL_PIN=claude-haiku-4-5-20251001 backend python3 /app/evals/run_evals.py --tier t4 --no-gate`
   (careful: this run's results also land in `latest.json`; re-run the nightly after).
+
+Experiments, including the ones not shipped, live in `evals/experiments/` with their numbers
+(e.g. the cross-encoder reranker: held-out MRR +0.05, no recall gain, so not shipped).
 
 Track record — bugs the evals caught that tests didn't:
 - T2 rejected the first chunking rewrite and validated the second (Police albums: 20% → 100% coverage).

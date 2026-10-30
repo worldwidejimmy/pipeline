@@ -161,7 +161,8 @@ Order, each shipped as code → tests/evals → docs → commit → push:
    on every push/PR; GitHub secret scanning + push protection; CI and eval badges.
 5. ✅ **Prompt caching** (2026-10-30): measured the threshold (~512–720 tok on Haiku 5.5) and the
    traffic first; static/dynamic system blocks; −25% $/query on T4.
-6. **Reranker** in RAG, with a before/after on T2.
+6. ✅ **Reranker: measured, not shipped** (2026-10-30). Held-out MRR +0.05, no extra documents
+   found, +190 ms CPU. Added 14 held-out T2 cases; see `evals/experiments/README.md`.
 7. **Answer feedback** (👍/👎) feeding the eval datasets.
 8. **Structured outputs**: ✅ intent extraction (pulled forward: it was the root cause of a
    live bug); supervisor routing still to do.

@@ -313,6 +313,18 @@ attacks, the subtle ones repeated, graded on what the attack achieved):
 
 ---
 
+## A reranker we measured and didn't ship
+
+Cross-encoder reranking is the textbook RAG upgrade, so it was tested properly. Tuned on
+the 20 retrieval cases, a fused MiniLM reranker lifted MRR 0.84 → 0.94. On **14 held-out
+cases** written beforehand, the gain shrank to +0.05, and it found **no additional
+documents** at any k. It only reorders chunks the model sees anyway, at +190 ms CPU per
+question. Not shipped. The held-out cases stayed in the eval suite, and they exposed a
+real gap (nameless descriptive queries) that is a query-rewriting problem, not a ranking
+one. Details: `cineai/evals/experiments/`.
+
+---
+
 ## Prompt caching: measured, then applied
 
 Every agent's system prompt is two blocks: fixed instructions first (cache-marked), then

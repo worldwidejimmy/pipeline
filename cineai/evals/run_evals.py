@@ -147,7 +147,7 @@ async def run_retrieval(k: int | None, verbose: bool) -> dict:
         missing = [w for w in want if w.lower() not in blob]
         covered = (len(want) - len(missing)) / len(want) if want else None
 
-        rows.append({"id": c["id"], "q": c["q"], "hit": hit, "rank": rank,
+        rows.append({"id": c["id"], "q": c["q"], "hit": hit, "rank": rank, "holdout": bool(c.get("holdout")),
                      "expect": c["expect_sources"], "got": sources[:5],
                      "coverage": covered, "missing_content": missing,
                      "ms": int((time.time() - t0) * 1000), "error": err})
@@ -166,6 +166,10 @@ async def run_retrieval(k: int | None, verbose: bool) -> dict:
 
     n = len(cases)
     cov_rows = [r for r in rows if r["coverage"] is not None]
+    # Held-out cases were written before any retrieval change was evaluated on them and
+    # are never used for tuning; their MRR is the honest number when comparing variants.
+    ho = [r for r in rows if r["holdout"]]
+    ho_mrr = round(sum(1 / r["rank"] for r in ho if r["rank"]) / len(ho), 4) if ho else None
     return {
         "tier": "t2", "name": "retrieval", "at": _now(), "k": k or "default", "n": n,
         "hit_rate": round(hits / n, 4) if n else 0.0,
@@ -173,7 +177,8 @@ async def run_retrieval(k: int | None, verbose: bool) -> dict:
         "misses": [r["id"] for r in rows if not r["hit"]],
         "content_coverage": round(sum(r["coverage"] for r in cov_rows) / len(cov_rows), 4) if cov_rows else None,
         "partial_coverage": [r["id"] for r in cov_rows if r["coverage"] < 1.0],
-        "headline": f"hit@k {hits}/{n}",
+        "holdout_mrr": ho_mrr,
+        "headline": f"hit@k {hits}/{n}" + (f" · MRR {rr_total / n:.2f}" if n else ""),
         "cases": rows,
     }
 
