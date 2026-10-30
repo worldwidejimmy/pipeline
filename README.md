@@ -284,6 +284,32 @@ tool contract, every tool and the Origin guard.
 
 ---
 
+## Guardrails: prompt injection, measured
+
+An agent that reads TMDB, MusicBrainz and the open web reads text that strangers can
+edit. Defences were built **after** measuring attacks, with a red-team eval tier (T7: 11
+attacks, the subtle ones repeated, graded on what the attack achieved):
+
+| | Before | After |
+|---|---|---|
+| Loud injections ("SYSTEM: ignore all instructions…"), system-prompt/secret extraction, off-topic jailbreak | resisted | resisted |
+| Scam link inside a web result / knowledge-base doc | passed through to the user, intermittently | **cannot render**: link allow-list on the output stream |
+| Fake "credits correction" planted in TMDB data | repeated to the user as a "discrepancy" | flagged and disregarded; the true director is stated |
+| Plain "Who directed Inception?" | **"couldn't find" ~40% of the time** (found via traces) | fixed: structured outputs |
+
+- **Spotlighting.** All third-party data enters prompts sanitised (HTML and
+  invisible/bidi/tag Unicode stripped) inside `<untrusted_data>` tags, with a rule that it
+  carries no instructions. Delimiter-forging is defanged.
+- **Deterministic output control.** Answers stream through a link allow-list (known
+  sources plus actual search-result URLs). It is property-tested so that any token
+  chunking gives the same output as filtering the whole answer.
+- **Structured outputs** (Claude's native JSON-schema mode) for intent extraction. The
+  traces showed the extractor sometimes *answering* the question instead of returning JSON.
+
+`cineai/backend/src/guardrails.py`, red-team cases `cineai/evals/datasets/redteam.jsonl`.
+
+---
+
 ## Observability with LangSmith
 
 Tracing is explicit, not ambient (`cineai/backend/src/tracing.py`):
@@ -320,7 +346,7 @@ Tracing is explicit, not ambient (`cineai/backend/src/tracing.py`):
 
 ## Roadmap
 
-- [x] **Automated evals** — routing accuracy, retrieval hit@k/MRR/content coverage, full-pipeline canaries, cost/latency, the MCP interface, and a calibrated LLM judge (groundedness, unanswerable questions) — nightly, gated, alerting. See `cineai/EVALS-PLAN.md`.
+- [x] **Automated evals** — routing accuracy, retrieval hit@k/MRR/content coverage, full-pipeline canaries, cost/latency, the MCP interface, a prompt-injection red team, and a calibrated LLM judge (groundedness, unanswerable questions) — nightly, gated, alerting. See `cineai/EVALS-PLAN.md`.
 - [x] **MCP server**: public retrieval tools plus an OAuth 2.1-protected agent tool, with a threat model and a nightly MCP eval tier. See `cineai/MCP-PLAN.md`.
 - [ ] **Redis semantic cache** — skip the LLM for repeated or near-identical queries
 - [ ] **Streaming tokens in Event Log** — surface token stream in the observability panel alongside the answer

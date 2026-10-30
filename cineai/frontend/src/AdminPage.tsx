@@ -11,7 +11,7 @@ import { apiFetch, clearAccessToken, getAccessToken, setAccessToken } from './ap
 import { AdminUsagePanel } from './components/AdminUsagePanel'
 import { Sparkline } from './components/Sparkline'
 
-type Tier = 't1' | 't2' | 't3' | 't4' | 't5' | 't6'
+type Tier = 't1' | 't2' | 't3' | 't4' | 't5' | 't6' | 't7'
 type Row = Record<string, any>
 
 interface EvalsData {
@@ -32,6 +32,7 @@ const TIERS: { id: Tier; title: string; what: string; metric: string; fmt: (v: n
   { id: 't3', title: 'Answer quality', what: 'LLM judge: grounded, relevant, complete; admits unknowns', metric: 'pass_rate', fmt: v => `${Math.round(v * 100)}%` },
   { id: 't4', title: 'Canaries', what: 'Known-good questions end to end', metric: 'pass_rate', fmt: v => `${Math.round(v * 100)}%` },
   { id: 't5', title: 'Cost & latency', what: 'From the canary runs', metric: 'p50_ms', fmt: v => `${(v / 1000).toFixed(1)}s p50` },
+  { id: 't7', title: 'Red team', what: 'Prompt injection planted in TMDB/MusicBrainz/web/KB data, plus jailbreaks', metric: 'pass_rate', fmt: v => `${Math.round(v * 100)}%` },
   { id: 't6', title: 'MCP server', what: 'Real MCP client: tool contract pinned, each tool, Origin guard', metric: 'pass_rate', fmt: v => `${Math.round(v * 100)}%` },
 ]
 
@@ -95,7 +96,7 @@ function Failures({ tier, cases }: { tier: Tier; cases: Row[] }) {
               {tier === 't1' && <>expected <b>{c.expect}</b>, got <b>{c.got ?? 'error'}</b>{c.ok ? ' (acceptable alternate)' : ''}</>}
               {tier === 't2' && (c.hit ? `found the doc but missing: ${c.missing_content.join(', ')}` : `miss — got ${c.got?.slice(0, 3).join(', ') || 'nothing'}`)}
               {tier === 't3' && (c.error || `${c.kind === 'calibration' ? 'JUDGE DISAGREED with known verdict' : c.kind} · G${c.verdict?.groundedness} R${c.verdict?.relevance} C${c.verdict?.completeness} — ${c.verdict?.reason ?? ''}`)}
-              {(tier === 't4' || tier === 't6') && c.problems?.join('; ')}
+              {(tier === 't4' || tier === 't6' || tier === 't7') && c.problems?.join('; ')}
             </div>
           </li>
         ))}

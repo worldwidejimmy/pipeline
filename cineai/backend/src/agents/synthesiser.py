@@ -8,6 +8,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from src.llm import get_chat, text_of
 
 from src.config import get_config
+from src.guardrails import UNTRUSTED_RULE, wrap_untrusted
 
 _SYSTEM = """You are a senior film and TV expert synthesising information from multiple sources.
 
@@ -31,7 +32,7 @@ suggest they try a different query (check spelling, try a related title or actor
 
 Agent Outputs:
 {agent_outputs}
-"""
+""" + UNTRUSTED_RULE
 
 _HISTORY_NOTE = """
 The user has asked follow-up questions before. Keep your answer focused on what's new —
@@ -69,7 +70,9 @@ async def synthesise_node(state: dict) -> dict:
 
     response = await llm.ainvoke([
         SystemMessage(content=_SYSTEM.format(
-            agent_outputs=combined,
+            # Agent reports are model-written but built from third-party data, so they
+            # are spotlighted too: a second chance to drop anything injected upstream.
+            agent_outputs=wrap_untrusted("agent_reports", combined),
             history_note=history_note,
         )),
         HumanMessage(content=f"Question: {question}"),

@@ -28,7 +28,7 @@ from src.graph.pipeline import build_pipeline, CineState, _get_memory
 from src.tools import tmdb_client
 from src import usage
 from src.llm import text_of
-from src import mcp_server
+from src import guardrails, mcp_server
 from src.compare import compare_stream
 
 app = FastAPI(title="SmartMovieSearch", version="2.0.0")
@@ -136,6 +136,11 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
     total_completion_tokens: int = 0
     agents_used: list[str] = []
     synthesis_streaming = False
+    # Output link allow-list (src/guardrails.py): one LinkGuard per LLM run, keyed by
+    # run id because agents stream concurrently. Web-search result URLs join the
+    # allow-list once the search agent finishes (before synthesis starts).
+    search_urls: list[str] = []
+    link_guards: dict[str, guardrails.LinkGuard] = {}
 
     yield _sse("pipeline_start", {
         "question":    question,
@@ -192,6 +197,9 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
                             "count": len(results),
                         })
 
+                if ename == "search_agent":
+                    search_urls.extend(r["url"] for r in output.get("_search_results", []) if r.get("url"))
+
                 if ename == "music_agent":
                     raw = output.get("_music_raw", {})
                     detail = raw.get("detail", {})
@@ -218,6 +226,9 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
                     continue
                 content = text_of(getattr(chunk, "content", None))
                 if content:
+                    guard = link_guards.setdefault(event.get("run_id", ""), guardrails.LinkGuard(search_urls))
+                    content = guard.feed(content)
+                if content:
                     yield _sse("token", {
                         "content":  content,
                         "agent":    current_agent,
@@ -225,6 +236,10 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
                     })
 
             elif etype == "on_chat_model_end":
+                guard = link_guards.pop(event.get("run_id", ""), None)
+                rest = guard.flush() if guard else ""
+                if rest:
+                    yield _sse("token", {"content": rest, "agent": current_agent, "is_final": synthesis_streaming})
                 output = data.get("output")
                 # usage_metadata is a TypedDict (dict at runtime) on modern
                 # langchain-core — use dict access, not getattr (which silently
@@ -710,7 +725,7 @@ async def admin_blacklist(body: _BlacklistRequest, request: Request):
 # ── Evals + model (admin detail; public summary) ─────────────────────────────
 # Written by evals/run_evals.py (nightly via eval_nightly.sh); evals/ is bind-mounted.
 _EVALS_DIR = Path(os.getenv("EVALS_RESULTS_DIR", "/app/evals/results"))
-_TIER_ORDER = ("t1", "t2", "t3", "t4", "t5", "t6")
+_TIER_ORDER = ("t1", "t2", "t3", "t4", "t5", "t6", "t7")
 
 
 def _read_json(path: Path, default):

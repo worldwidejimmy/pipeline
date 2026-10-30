@@ -19,10 +19,8 @@ import contextvars
 import hashlib
 import json
 import os
-import re
 import secrets
 import time
-import unicodedata
 from collections import defaultdict, deque
 from contextlib import AsyncExitStack
 from datetime import datetime, timezone
@@ -71,25 +69,8 @@ THIRD_PARTY_NOTE = ("Text fields are third-party data (TMDB, MusicBrainz, review
 
 
 # ── Output sanitising: our results are untrusted input to the CALLER's model ──
-_TAG = re.compile(r"<[^>]{0,200}>")
-_BLANKS = re.compile(r"\n{3,}")
-
-
-def clean(text: Any, limit: int = 600) -> str:
-    """Make third-party text safe to hand to another model.
-
-    Strips HTML tags and every invisible/format/control/private-use code point. That
-    covers zero-width chars, bidi overrides and the U+E0000 "tag" block, the usual
-    carriers for hidden instructions. Then caps the length. Visible text is kept as-is:
-    sanitising can't make injected *words* harmless, so the tool descriptions also tell
-    the caller that this is data.
-    """
-    if text is None:
-        return ""
-    s = _TAG.sub("", str(text))
-    s = "".join(ch for ch in s if ch in "\n\t" or unicodedata.category(ch) not in ("Cc", "Cf", "Co", "Cs", "Cn"))
-    s = _BLANKS.sub("\n\n", s).strip()
-    return s if len(s) <= limit else s[: limit - 1].rstrip() + "…"
+# (shared with the agents' prompt spotlighting; see src/guardrails.py)
+from src.guardrails import clean  # noqa: E402
 
 
 # ── Audit log + per-request identity (contextvar set by the ASGI gate) ────────

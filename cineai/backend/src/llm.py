@@ -147,6 +147,25 @@ def get_chat(*, temperature: float = 0.1, max_tokens: int = 1024,
     return ChatAnthropic(**kwargs)
 
 
+async def extract(schema: Any, system: str, user: str, *, max_tokens: int = 256) -> dict | None:
+    """Structured extraction with Claude's native structured outputs (JSON schema).
+
+    The reply is constrained to `schema` (a Pydantic model), so the model can't answer
+    in prose instead. Prose instead of JSON is the failure that made "Who directed
+    Inception?" come back "couldn't find" ~40% of the time (found via T7 traces,
+    2026-10-30). Returns a plain dict, or None if the call or validation fails (callers
+    keep their own fallback).
+    """
+    from langchain_core.messages import HumanMessage, SystemMessage
+    try:
+        llm = get_chat(temperature=0.0, max_tokens=max_tokens).with_structured_output(schema, method="json_schema")
+        out = await llm.ainvoke([SystemMessage(content=system), HumanMessage(content=user)])
+        return out.model_dump() if hasattr(out, "model_dump") else dict(out)
+    except Exception as exc:
+        print(f"[llm.extract] {getattr(schema, '__name__', 'schema')} failed: {type(exc).__name__}: {str(exc)[:160]}")
+        return None
+
+
 def text_of(content: Any) -> str:
     """Text of a message/chunk .content — a str, or a list of blocks when the model
     returned thinking blocks alongside text. Thinking is never surfaced."""

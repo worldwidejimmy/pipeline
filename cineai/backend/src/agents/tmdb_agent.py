@@ -11,11 +11,15 @@ from __future__ import annotations
 import asyncio
 import json
 
+from typing import Literal, Optional
+
 from langchain_core.messages import HumanMessage, SystemMessage
-from src.llm import get_chat, parse_llm_json, text_of
+from pydantic import BaseModel, Field
+from src.llm import extract, get_chat, text_of
 
 from src.config import get_config
 from src.tools import tmdb_client
+from src.guardrails import UNTRUSTED_RULE, clean_obj, wrap_untrusted
 
 _EXTRACT_SYSTEM = """Extract structured search intent from the user's movie/TV question.
 
@@ -86,7 +90,7 @@ LINKS — always include a TMDB link for the main title(s) using the id and medi
 
 TMDB Data:
 {tmdb_data}
-"""
+""" + UNTRUSTED_RULE
 
 # TMDB genre name → ID mapping (top genres)
 _GENRE_MAP = {
@@ -98,6 +102,17 @@ _GENRE_MAP = {
 }
 
 
+class TmdbIntent(BaseModel):
+    """What to ask TMDB for (see _EXTRACT_SYSTEM for when to use each search_type)."""
+    search_type: Literal["search_title", "trending", "discover", "search_person", "title_and_person"]
+    query: Optional[str] = Field(None, description="movie/TV title, franchise, or person name")
+    person: Optional[str] = Field(None, description="actor/director to compare a title against")
+    genre: Optional[str] = None
+    year: Optional[int] = None
+    sort_by: Optional[Literal["popularity.desc", "vote_average.desc", "release_date.desc"]] = None
+    min_rating: Optional[float] = None
+
+
 def _get_llm(max_tokens: int = 1024):
     return get_chat(temperature=0.1, max_tokens=max_tokens, streaming=True)
 
@@ -105,20 +120,11 @@ def _get_llm(max_tokens: int = 1024):
 async def tmdb_agent_node(state: dict) -> dict:
     """LangGraph node: extract intent → call TMDB → generate answer."""
     question = state["question"]
-    llm_extract = _get_llm(max_tokens=256)
 
-    # Step 1: Extract intent
-    intent_resp = await llm_extract.ainvoke([
-        SystemMessage(content=_EXTRACT_SYSTEM),
-        HumanMessage(content=question),
-    ])
-
-    try:
-        intent = parse_llm_json(text_of(intent_resp.content))
-    except Exception:
-        # Searching TMDB for the raw question rarely matches a title — log it
-        # so a broken extraction shows up in `docker compose logs backend`.
-        print(f"[tmdb_agent] intent extraction unparseable, falling back to raw question: {text_of(intent_resp.content)[:120]!r}")
+    # Step 1: Extract intent: schema-constrained, so it can't come back as prose.
+    intent = await extract(TmdbIntent, _EXTRACT_SYSTEM, question)
+    if intent is None:
+        # Searching TMDB for the raw question rarely matches a title; extract() logged why.
         intent = {"search_type": "search_title", "query": question}
 
     search_type = intent.get("search_type", "search_movie")
@@ -235,11 +241,12 @@ async def tmdb_agent_node(state: dict) -> dict:
     # title_and_person queries carry more data — give the LLM more room
     max_out = 1500 if search_type in ("movie_and_person", "title_and_person") else 1024
     llm_answer = _get_llm(max_tokens=max_out)
-    tmdb_text = json.dumps(tmdb_data, indent=2, default=str)
+    # Compact JSON (indent=2 spent ~35% of the char budget on whitespace) of sanitised data.
+    tmdb_text = json.dumps(clean_obj(tmdb_data), separators=(",", ":"), default=str)
     char_limit = 9000 if search_type in ("movie_and_person", "title_and_person") else 6000
 
     answer_resp = await llm_answer.ainvoke([
-        SystemMessage(content=_ANSWER_SYSTEM.format(tmdb_data=tmdb_text[:char_limit])),
+        SystemMessage(content=_ANSWER_SYSTEM.format(tmdb_data=wrap_untrusted("tmdb", tmdb_text[:char_limit]))),
         HumanMessage(content=question),
     ])
 

@@ -6,11 +6,15 @@ from __future__ import annotations
 
 import json
 
+from typing import Literal, Optional
+
 from langchain_core.messages import HumanMessage, SystemMessage
-from src.llm import get_chat, parse_llm_json, text_of
+from pydantic import BaseModel, Field
+from src.llm import extract, get_chat, text_of
 
 from src.config import get_config
 from src.tools import musicbrainz_client
+from src.guardrails import UNTRUSTED_RULE, clean_obj, wrap_untrusted
 
 _EXTRACT_SYSTEM = """Extract structured music search intent from the user's question.
 
@@ -57,7 +61,13 @@ LINKS — always include a MusicBrainz link using the id (mbid) fields:
 
 MusicBrainz Data:
 {music_data}
-"""
+""" + UNTRUSTED_RULE
+
+
+class MusicIntent(BaseModel):
+    search_type: Literal["artist", "album"]
+    artist: Optional[str] = None
+    album: Optional[str] = Field(None, description="album or song title")
 
 
 def _get_llm(max_tokens: int = 1024):
@@ -67,17 +77,10 @@ def _get_llm(max_tokens: int = 1024):
 async def music_agent_node(state: dict) -> dict:
     """LangGraph node: extract intent → call MusicBrainz → generate answer."""
     question = state["question"]
-    llm_extract = _get_llm(max_tokens=128)
 
-    # Step 1: Extract intent
-    intent_resp = await llm_extract.ainvoke([
-        SystemMessage(content=_EXTRACT_SYSTEM),
-        HumanMessage(content=question),
-    ])
-    try:
-        intent = parse_llm_json(text_of(intent_resp.content))
-    except Exception:
-        print(f"[music_agent] intent extraction unparseable, falling back to raw question: {text_of(intent_resp.content)[:120]!r}")
+    # Step 1: Extract intent: schema-constrained (see llm.extract).
+    intent = await extract(MusicIntent, _EXTRACT_SYSTEM, question, max_tokens=128)
+    if intent is None:
         intent = {"search_type": "artist", "artist": question, "album": None}
 
     search_type = intent.get("search_type", "artist")
@@ -112,10 +115,10 @@ async def music_agent_node(state: dict) -> dict:
     llm_answer = _get_llm(max_tokens=1024)
     # Compact JSON: indent=2 made a typical artist ~7.4k chars, so the [:6000] cut
     # dropped the tail of the release list mid-entry (found by the T4 cars canary).
-    music_text = json.dumps(music_data, separators=(",", ":"), default=str)
+    music_text = json.dumps(clean_obj(music_data), separators=(",", ":"), default=str)
 
     answer_resp = await llm_answer.ainvoke([
-        SystemMessage(content=_ANSWER_SYSTEM.format(music_data=music_text[:6000])),
+        SystemMessage(content=_ANSWER_SYSTEM.format(music_data=wrap_untrusted("musicbrainz", music_text[:6000]))),
         HumanMessage(content=question),
     ])
 

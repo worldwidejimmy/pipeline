@@ -9,6 +9,7 @@ from src.llm import get_chat, text_of
 
 from src.config import get_config
 from src.tools.milvus_retriever import retrieve
+from src.guardrails import UNTRUSTED_RULE, wrap_untrusted
 
 _SYSTEM = """You are a film expert with deep knowledge of cinema history, theory, and criticism.
 
@@ -19,7 +20,7 @@ Do NOT hallucinate or invent information not present in the context.
 
 Context:
 {context}
-"""
+""" + UNTRUSTED_RULE
 
 
 def _get_llm():
@@ -41,7 +42,7 @@ async def rag_agent_node(state: dict) -> dict:
 
     llm = _get_llm()
     response = await llm.ainvoke([
-        SystemMessage(content=_SYSTEM.format(context=context)),
+        SystemMessage(content=_SYSTEM.format(context=wrap_untrusted("knowledge_base", context))),
         HumanMessage(content=question),
     ])
 

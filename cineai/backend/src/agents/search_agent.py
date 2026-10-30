@@ -9,6 +9,7 @@ from src.llm import get_chat, text_of
 
 from src.config import get_config
 from src.tools.web_search import web_search
+from src.guardrails import UNTRUSTED_RULE, wrap_untrusted
 
 _SYSTEM = """You are an entertainment journalist with access to current movie and TV news.
 
@@ -18,7 +19,7 @@ Focus on recent, factual information. Do not invent details.
 
 Search Results:
 {results}
-"""
+""" + UNTRUSTED_RULE
 
 
 def _get_llm():
@@ -44,7 +45,7 @@ async def search_agent_node(state: dict) -> dict:
 
     llm = _get_llm()
     response = await llm.ainvoke([
-        SystemMessage(content=_SYSTEM.format(results=formatted[:5000])),
+        SystemMessage(content=_SYSTEM.format(results=wrap_untrusted("web_search", formatted[:5000]))),
         HumanMessage(content=question),
     ])
 

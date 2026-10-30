@@ -26,6 +26,7 @@ from typing import AsyncIterator
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from src.guardrails import UNTRUSTED_RULE, LinkGuard, wrap_untrusted
 from src.judge_labels import LabelNormaliser
 from src.llm import get_chat, model_id, text_of
 from src.tools.milvus_retriever import retrieve
@@ -40,7 +41,7 @@ Do NOT hallucinate or invent information not present in the context.
 
 Context:
 {context}
-"""
+""" + UNTRUSTED_RULE
 
 _BASE_SYSTEM = """You are a film expert with deep knowledge of cinema history, theory, and criticism.
 
@@ -115,7 +116,7 @@ async def compare_stream(question: str, ip: str | None = None) -> AsyncIterator[
     context = retrieval.get("context", "")
     rag_messages = [
         SystemMessage(content=_RAG_SYSTEM.format(
-            context=context or "(no relevant documents were found)")),
+            context=wrap_untrusted("knowledge_base", context) if context else "(no relevant documents were found)")),
         HumanMessage(content=question),
     ]
     base_messages = [
@@ -134,13 +135,18 @@ async def compare_stream(question: str, ip: str | None = None) -> AsyncIterator[
         await queue.put(_sse("agent_start", {"agent": agent}))
         await queue.put(_sse("llm_start", {"agent": agent, "model": model_id()}))
         full = None
+        guard = LinkGuard()                       # output link allow-list (src/guardrails.py)
         try:
             async for chunk in _llm().astream(messages, config=trace_cfgs[side] or None):
                 full = chunk if full is None else full + chunk
-                content = text_of(getattr(chunk, "content", None))
+                content = guard.feed(text_of(getattr(chunk, "content", None)) or "")
                 if content:
                     answers[side] += content
                     await queue.put(_sse("compare_token", {"side": side, "content": content}))
+            rest = guard.flush()
+            if rest:
+                answers[side] += rest
+                await queue.put(_sse("compare_token", {"side": side, "content": rest}))
             um = getattr(full, "usage_metadata", None) or {}
             p = um.get("input_tokens", 0) or 0
             c = um.get("output_tokens", 0) or 0

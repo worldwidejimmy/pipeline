@@ -2,7 +2,7 @@
 #
 # Nightly evals for SmartMovieSearch — the "is the unattended system still right?" job.
 #
-# Runs T1 routing + T2 retrieval + T4 canaries (+T5 cost/latency) + T6 MCP against the live
+# Runs T1 routing + T2 retrieval + T4 canaries (+T5 cost/latency) + T6 MCP + T7 red team against the live
 # backend container, and the weekly T3 LLM-judge tier on Sundays. Results land in
 # evals/results/ (latest.json is what the daily ops digest, the box dashboard and
 # /admin read). On a REGRESSION against evals/baseline.json it emails the admin
@@ -28,7 +28,7 @@ flock -n 9 || { echo "$(date -u): eval run already in progress — exiting" >>"$
 
 TIERS="nightly"
 if [[ "${1:-}" == "weekly" || "$(date -u +%u)" == "7" ]]; then
-    TIERS="t1,t2,t3,t4,t6"
+    TIERS="t1,t2,t3,t4,t6,t7"
 fi
 
 docker compose exec -T backend python3 /app/evals/run_evals.py --tier "$TIERS" >"$LOG" 2>&1

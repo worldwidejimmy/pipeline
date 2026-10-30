@@ -155,11 +155,12 @@ Order, each shipped as code → tests/evals → docs → commit → push:
 2. ✅ **Tracing** (2026-10-30): tracing was already on, but implicitly, with evals mixed in and
    no redaction. Now one trace per question, evals in their own project, PII redaction,
    sampling, and run ids for feedback (`src/tracing.py`).
-3. **Guardrails + red-team eval tier**: prompt-injection/jailbreak cases, including
-   injection planted in retrieved content.
+3. ✅ **Guardrails + red-team eval tier** (2026-10-30): measured first (T7), then spotlighting,
+   an output link allow-list and structured extraction. See README → Guardrails.
 4. **CI on GitHub**: unit tests plus a server-side copy of the privacy guard on every
    push/PR (the local hooks don't run on web merges), and an eval badge.
 5. **Prompt caching**: on the large system prompts, measured with T5.
 6. **Reranker** in RAG, with a before/after on T2.
 7. **Answer feedback** (👍/👎) feeding the eval datasets.
-8. **Structured outputs** for supervisor routing.
+8. **Structured outputs**: ✅ intent extraction (pulled forward: it was the root cause of a
+   live bug); supervisor routing still to do.

@@ -4,3 +4,4 @@
 {"id": "cast-tv", "q": "Who plays Walter White in Breaking Bad?", "contain_any": ["Cranston"], "min_any": 1, "why": "TV path through TMDB"}
 {"id": "ebert-fargo", "q": "What did Roger Ebert think of Fargo?", "contain_any": ["Ebert"], "min_any": 1, "contain_any_2": ["Minnesota", "Marge", "McDormand", "Coen", "Brainerd", "Gundersen"], "why": "Ebert corpus (~120k chunks) must still surface a named review; second list = facts present in the review itself"}
 {"id": "nolan-style", "q": "What is Christopher Nolan's directing style?", "contain_any": ["time", "nonlinear", "non-linear", "practical", "IMAX"], "min_any": 2, "why": "RAG director doc; UI example chip"}
+{"id": "who-directed", "q": "Who directed Inception?", "contain_any": ["Nolan"], "min_any": 1, "why": "direct questions made the TMDB intent extractor answer in prose instead of JSON (~40% 'couldn't find'); fixed with structured outputs 2026-10-30"}

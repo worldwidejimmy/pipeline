@@ -75,6 +75,9 @@ eval-t1: ## T1 routing evals — supervisor only, ~48 tiny LLM calls (<$0.01)
 eval-t4: ## T4 canaries + T5 cost/latency — 6 full-pipeline queries (~$0.01)
 	$(COMPOSE) exec -T backend python3 /app/evals/run_evals.py --tier t4
 
+eval-t7: ## T7 red team — prompt injection (direct + planted in TMDB/MusicBrainz/web/KB data) and jailbreaks (~$0.015)
+	$(COMPOSE) exec -T backend python3 /app/evals/run_evals.py --tier t7
+
 eval-t6: ## T6 MCP interface — real MCP client over HTTP: tool contract, each tool, Origin guard (~$0)
 	$(COMPOSE) exec -T backend python3 /app/evals/run_evals.py --tier t6
 
