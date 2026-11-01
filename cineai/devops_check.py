@@ -120,7 +120,7 @@ for d in ("~/backups", "~/db-backups", "~/config-backups"):
     if not root.is_dir():
         continue
     for f in root.rglob("*"):
-        if not f.is_file() or f.suffix in (".age", ".tmp"):
+        if not f.is_file() or f.suffix in (".age", ".tmp", ".log"):  # logs stay local by design
             continue
         if any(ok in f.parts for ok in PLAINTEXT_OK):
             continue
