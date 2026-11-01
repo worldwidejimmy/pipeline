@@ -97,7 +97,7 @@ else:
 # whether the OFF-SITE copy is current; it exits non-zero when stale/missing.
 # NOTE: box-level concern living in an app-level check — move to a box-wide devops
 # check when one exists (see server-management/BACKUP-STRATEGY.md).
-OFFSITE = Path.home() / "Code/server-management/scripts/backup-to-dropbox.sh"
+OFFSITE = Path.home() / "apps/server-management/scripts/backup-to-dropbox.sh"
 if OFFSITE.exists():
     try:
         r = subprocess.run([str(OFFSITE), "--check"], capture_output=True, text=True, timeout=90)

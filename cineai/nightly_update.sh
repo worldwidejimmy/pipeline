@@ -53,7 +53,7 @@ if [ "${ADDED:-0}" -gt 0 ] 2>/dev/null; then
     echo
     echo "--- run summary ---"
     tr '\r' '\n' < "$LOG" | grep -iE 'reviews loaded|already present|chunks to embed|chunks added|total in Milvus|Refreshing|new this pass' | tail -12
-  } | /home/ubuntu/Code/pipeline/cineai/send_email.py "🎬 SmartMovieSearch: +${ADDED} review chunks tonight" || true
+  } | /home/ubuntu/apps/pipeline/cineai/send_email.py "🎬 SmartMovieSearch: +${ADDED} review chunks tonight" || true
 fi
 
 # Keep the log dir tidy.

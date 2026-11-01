@@ -461,7 +461,7 @@ SSE is one-directional (server → client) which matches our use case exactly. I
 
 ### Start everything (fresh boot or after a restart)
 ```bash
-cd ~/Code/pipeline/cineai
+cd ~/apps/pipeline/cineai
 docker compose up -d          # starts: milvus + etcd + minio + backend + frontend
 docker compose ps             # verify all containers healthy (takes ~30s)
 curl http://localhost:8001/api/health   # should return {"status":"ok"}
@@ -469,7 +469,7 @@ curl http://localhost:8001/api/health   # should return {"status":"ok"}
 
 ### Stop everything
 ```bash
-cd ~/Code/pipeline/cineai
+cd ~/apps/pipeline/cineai
 docker compose down           # stops and removes containers (data volumes preserved)
 ```
 
@@ -538,11 +538,11 @@ The app is running live on the OVH VPS (behind Cloudflare — direct IP not list
 → proxies `smartmoviesearch.com` → `localhost:5174`  
 → SSE-safe: `proxy_buffering off`, `proxy_read_timeout 600s`
 
-**Port block allocated:** `5160–5179` (see `~/Code/server-management/app-registry.json`)
+**Port block allocated:** `5160–5179` (see `~/apps/server-management/app-registry.json`)
 
 **Docker Compose v2** is required (installed as CLI plugin at `/usr/local/lib/docker/cli-plugins/docker-compose`). The `Makefile` uses `docker compose` (space, not hyphen).
 
-**Environment:** `~/Code/pipeline/.env` is symlinked to `cineai/backend/.env`.
+**Environment:** `~/apps/pipeline/.env` is symlinked to `cineai/backend/.env`.
 
 ---
 
