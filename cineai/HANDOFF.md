@@ -3,7 +3,7 @@
 **Branch:** `main` in `worldwidejimmy/pipeline`  
 **Project path:** `cineai/` (subdirectory of the pipeline repo)  
 **Live URL:** `https://smartmoviesearch.com`  
-**Target deploy:** OVH cloud VPS + Cloudflare in front  
+**Target deploy:** cloud VPS with a CDN/WAF proxy in front  
 **Last updated by:** Claude — follow-up rewriting, knowledge base first (calibrated relevance gate), chat UI with step trace, Evals & ops panel
 
 ---
@@ -25,7 +25,7 @@ pipeline/                          ← git root (worldwidejimmy/pipeline)
 │   ├── HANDOFF.md                 ← you are here
 │   ├── README.md                  ← full project README
 │   ├── docker-compose.yml         ← full stack: Milvus + backend + frontend
-│   ├── nginx.conf                 ← production nginx for OVH + Cloudflare
+│   ├── nginx.conf                 ← production nginx for the VPS + CDN
 │   ├── Makefile                   ← common operations
 │   ├── start.sh                   ← dev startup script
 │   ├── backend/
@@ -79,9 +79,9 @@ pipeline/                          ← git root (worldwidejimmy/pipeline)
 ## Architecture
 
 ```
-Browser (port 80/443 via Cloudflare)
+Browser (port 80/443 via the CDN)
     │
-  nginx (OVH)
+  nginx (VPS)
     ├── /          → serves frontend static files (dist/)
     └── /api/*     → proxy_pass to FastAPI :8001
          │
@@ -181,7 +181,7 @@ changing the schema and re-ingesting the corpus.
 
 ---
 
-## OVH Server Setup (step by step)
+## VPS Server Setup (step by step)
 
 ### 1. Clone the repo
 
@@ -248,7 +248,7 @@ There is also a Playwright browser test of the whole running stack (`tests/e2e.m
 
 ```bash
 make test-e2e          # installs playwright + chromium on first run
-E2E_LIVE=1 make test-e2e      # additionally checks https://smartmoviesearch.com through Cloudflare
+E2E_LIVE=1 make test-e2e      # additionally checks https://smartmoviesearch.com through the CDN
 ```
 
 It exercises the real UI end to end (30 checks) — homepage, trending, a full agent-pipeline
@@ -269,7 +269,7 @@ npm run build
 
 ---
 
-## Nginx + Cloudflare Setup
+## Nginx + CDN Setup
 
 ### Nginx config (see `nginx.conf` in this directory)
 
@@ -277,10 +277,10 @@ Key points:
 - Serves `frontend/dist/` as static files for all non-API routes
 - Proxies `/api/*` to uvicorn on `localhost:8001`
 - SSE requires `proxy_buffering off` and specific timeout settings
-- Cloudflare handles SSL termination — nginx can use HTTP internally
+- The CDN handles TLS termination — nginx can use HTTP internally
 
 ```bash
-# A dedicated site config is already live on the OVH server:
+# A dedicated site config is already live on the VPS:
 # /etc/nginx/sites-available/smartmoviesearch.com  (proxies to localhost:5174)
 # /etc/nginx/sites-enabled/smartmoviesearch.com    (symlinked)
 #
@@ -290,16 +290,15 @@ sudo ln -sf /etc/nginx/sites-available/smartmoviesearch.com /etc/nginx/sites-ena
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-### Cloudflare settings (smartmoviesearch.com zone)
-- **SSL/TLS mode:** Full (Strict) with **Authenticated Origin Pulls** (since 2026-06-27): Cloudflare
-  connects to nginx on 443 (Cloudflare origin certificate) and must present its client
+### CDN settings (smartmoviesearch.com zone)
+- **SSL/TLS mode:** Full (Strict) with **mTLS origin authentication** (since 2026-06-27): the CDN
+  connects to nginx on 443 (CDN origin certificate) and must present its client
   certificate (`ssl_verify_client on`); a direct request to the origin is refused, and port 80
   redirects to HTTPS. See `SECURITY-AUDIT.md` SEC-1. (The checked-in `nginx.conf` predates this.)
 - **DNS:** A record → your VPS IP, orange cloud (proxied) ✓
 - **Minimum TLS:** 1.2
 - **Cache:** Disable caching for `/api/*` paths (Page Rule or Cache Rule)
-- **Response Buffering:** OFF for SSE to stream through Cloudflare without batching
-- **Note:** Rocket Loader no longer exists in Cloudflare UI (deprecated)
+- **Response Buffering:** OFF for SSE to stream through the CDN without batching
 
 ---
 
@@ -475,7 +474,7 @@ Milvus handles billion-scale vectors in distributed mode (same collection, just 
 TMDB has a generous free API (50 req/s), active maintenance, poster images, and covers TV equally well. IMDB's API is expensive. OMDB is limited. TMDB is the industry standard for indie movie apps.
 
 **Why SSE over WebSocket?**
-SSE is one-directional (server → client) which matches our use case exactly. It's simpler, works through Cloudflare without extra configuration (unlike WebSockets which need specific CF settings), and EventSource reconnects automatically on drop.
+SSE is one-directional (server → client) which matches our use case exactly. It's simpler, works through the CDN without extra configuration (unlike WebSockets which need specific CDN settings), and EventSource reconnects automatically on drop.
 
 **The `error` → `pipeline_error` rename:**
 `EventSource` has a built-in `error` event for connection failures. Naming our pipeline errors `error` means they never reach the application handler — they're swallowed by the connection error handler. Renamed to `pipeline_error` on both ends.
@@ -543,14 +542,14 @@ shared across multiple backend replicas:
 - `DAILY_TOKEN_BUDGET` is display-only: the denominator for the token meter.
 
 Client identity for all of the above comes from `usage.client_ip()`, which
-prefers **`CF-Connecting-IP`** — see the client-IP note below, this is the only
+prefers **the CDN's client-IP header** — see the client-IP note below, this is the only
 header that is trustworthy here.
 
 ---
 
-## OVH Deployment — Current State
+## VPS Deployment — Current State
 
-The app is running live on the OVH VPS (behind Cloudflare — direct IP not listed here):
+The app is running live on the VPS (behind a CDN/WAF proxy — direct IP not listed here):
 
 | Service | Port | Container |
 |---|---|---|
@@ -649,7 +648,7 @@ by `mcp_server.Gateway` (last lines of `main.py`): `/mcp` and the OAuth metadata
 MCP apps, everything else to FastAPI. The frontend nginx proxies those paths to the backend.
 
 - **Public `/mcp`:** 5 read-only tools, no LLM spend. 30/min and 500/day per IP (real IP
-  from `CF-Connecting-IP`), 5000/day in total, the shared IP blacklist applies, 64 KB body cap.
+  from the CDN's client-IP header), 5000/day in total, the shared IP blacklist applies, 64 KB body cap.
 - **`/mcp/agent` (`ask`):** mounted only when `MCP_OAUTH_ISSUER` and `MCP_OAUTH_AUDIENCE`
   are set (`MCP_OAUTH_JWKS_URL` and `MCP_OAUTH_SCOPE` are optional; see `.env.example`).
   The audience must be exactly `https://smartmoviesearch.com/mcp/agent`. 25 questions per

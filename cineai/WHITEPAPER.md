@@ -31,9 +31,9 @@ No single API or model provides all of this. The solution is a **multi-agent arc
 
 ```
 User (browser)
-    │  HTTPS via Cloudflare CDN
+    │  HTTPS via a CDN
     │
-  Nginx (reverse proxy, OVH VPS)
+  Nginx (reverse proxy, cloud VPS)
     ├── /          → React frontend (static, port 5174)
     └── /api/*     → FastAPI backend (uvicorn, port 8001)
                         │  Server-Sent Events stream
@@ -102,15 +102,15 @@ obvious next optimisation.
 
 The backend is a FastAPI application that exposes a single streaming endpoint: `GET /api/query?q=...&thread_id=...`. It runs the LangGraph pipeline with `astream_events()` and translates internal events (agent start/end, LLM token, TMDB results, RAG chunks) into a typed SSE stream consumed by the browser.
 
-**Why SSE over WebSockets?** SSE is unidirectional (server → client), which matches this use case exactly. It works through Cloudflare without any special configuration, and `EventSource` in the browser reconnects automatically on drop. WebSockets require additional Cloudflare settings and bidirectional protocol overhead that is unnecessary here.
+**Why SSE over WebSockets?** SSE is unidirectional (server → client), which matches this use case exactly. It works through the CDN without any special configuration, and `EventSource` in the browser reconnects automatically on drop. WebSockets require additional the CDN settings and bidirectional protocol overhead that is unnecessary here.
 
 ### React + Vite Frontend
 
 The frontend is a React/TypeScript SPA built with Vite, laid out as a chat. It maintains a live `EventSource` connection per query, and every answer carries a **step trace**: the follow-up rewrite, the knowledge-base verdict and how it was decided, the routing, each source's result, the free lookups vs. Claude calls (purpose, tokens in/out), what the combiner received, any links the guardrail removed, and the model. Older turns fold to a one-line summary. An optional panel (⚡) adds an animated **pipeline graph**, a **Gantt timeline**, a **typed event log**, and a **context panel** (retrieved chunks and TMDB cards). A **🧪 Evals & ops** panel shows every eval tier, the scheduled jobs and the nightly ingest/embedding history. A dark/light theme toggle persists preference to `localStorage`.
 
-### Docker Compose + Nginx + Cloudflare
+### Docker Compose + Nginx + CDN
 
-The full stack (Milvus + etcd + MinIO + backend + frontend) runs as Docker Compose services on a single OVH VPS. Nginx acts as a reverse proxy: it serves the compiled React static files for all non-API routes and proxies `/api/*` to uvicorn. Cloudflare sits in front for SSL termination, DDoS protection, and CDN caching of static assets.
+The full stack (Milvus + etcd + MinIO + backend + frontend) runs as Docker Compose services on a single cloud VPS. Nginx acts as a reverse proxy: it serves the compiled React static files for all non-API routes and proxies `/api/*` to uvicorn. The CDN sits in front for SSL termination, DDoS protection, and CDN caching of static assets.
 
 ---
 
@@ -142,7 +142,7 @@ Total latency: typically 3–6 seconds. The user sees tokens appearing within ~1
 | **Observable pipeline** | Every answer shows its own step trace (sources, Claude calls, tokens, model) — the AI process is not a black box |
 | **Filmography comparison** | `movie_and_person` intent fetches movie detail + actor filmography in parallel; ranks by rating |
 | **Structured error UX** | Rate limits, auth failures, and network errors surface as categorised, friendly banners |
-| **Production deployed** | Live on OVH VPS behind Cloudflare with Docker Compose, nginx reverse proxy, and SSL |
+| **Production deployed** | Live on a cloud VPS behind a CDN/WAF proxy with Docker Compose, nginx reverse proxy, and SSL |
 
 ---
 
@@ -158,4 +158,4 @@ Total latency: typically 3–6 seconds. The user sees tokens appearing within ~1
 | Web search | Tavily API | Current web results as a third retrieval source |
 | Backend | FastAPI + uvicorn | Async SSE streaming, typed event protocol |
 | Frontend | React + TypeScript + Vite | Real-time pipeline visualisation, conversation UI |
-| Infrastructure | Docker Compose + Nginx + Cloudflare | Containerised deployment, reverse proxy, SSL/CDN |
+| Infrastructure | Docker Compose + Nginx + CDN | Containerised deployment, reverse proxy, SSL/CDN |

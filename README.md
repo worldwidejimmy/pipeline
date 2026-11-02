@@ -79,7 +79,7 @@ deployable via Docker Compose.
 | Backend | FastAPI + Server-Sent Events (SSE) streaming |
 | Frontend | React + TypeScript + Vite |
 | Observability | [LangSmith](https://smith.langchain.com) (optional) |
-| Deployment | Docker Compose + Nginx + Cloudflare |
+| Deployment | Docker Compose + Nginx + CDN |
 
 ### AI/ML Pipeline Ecosystem
 

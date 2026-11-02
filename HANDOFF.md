@@ -111,13 +111,13 @@ The site is **public** — no password wall. `src/usage.py` enforces:
 - **Site-wide daily cap:** `GLOBAL_DAILY_CALL_CAP` (default **30**) — total anonymous searches/day across everyone (research/showcase). Over it → `code: "daily_cap"`. Signed-in/admin bypasses. Also `DAILY_TOKEN_HARD_CAP` (default 0/off) pauses anonymous calls once the day's token spend is hit. Both reset at UTC midnight; counters are in-memory.
 - **Signed in:** the old `PREVIEW_PASSWORD` now grants **unlimited** access (token via `POST /api/auth`, sent as `X-Access-Token` / `?_t=`). Leaving `PREVIEW_PASSWORD` blank means *no one* can unlock unlimited.
 - **Token meter:** cumulative Claude tokens used **today by everyone** (your paid spend), accumulated server-side and exposed at **`GET /api/usage`** alongside the caller's remaining free credits. `DAILY_TOKEN_BUDGET` (default 0 = no cap) optionally sets a meter denominator.
-- **Real client IP:** read from `CF-Connecting-IP` (Cloudflare), then `X-Forwarded-For[0]`. **Do not** trust `X-Real-IP` — the frontend-container nginx overwrites it with the docker gateway.
+- **Real client IP:** read from the CDN's client-IP header (`usage.client_ip`), then `X-Forwarded-For[0]`. **Do not** trust `X-Real-IP` — the frontend-container nginx overwrites it with the docker gateway.
 
 Most counters are in-memory (reset on backend redeploy); the **IP blacklist** persists to `data/ip_blacklist.json` (volume-mounted).
 
 ### Abuse controls + admin
 
-- **Bot protection (lightweight):** `/api/query` and `/api/compare` reject empty / known-library User-Agents and present-but-foreign `Origin`/`Referer` (`_looks_like_bot` in `main.py`). Signed-in callers bypass it. Cloudflare **Turnstile** is the intended stronger layer — not yet wired.
+- **Bot protection (lightweight):** `/api/query` and `/api/compare` reject empty / known-library User-Agents and present-but-foreign `Origin`/`Referer` (`_looks_like_bot` in `main.py`). Signed-in callers bypass it. A CDN challenge (CAPTCHA) is the intended stronger layer — not yet wired.
 - **IP blacklist:** `usage.is_blacklisted` blocks at `consume()`; manage via the admin screen.
 - **Auth lockout:** `/api/auth` locks an IP after `AUTH_MAX_FAILS` (5) failures for `AUTH_LOCKOUT_SECONDS` (900s).
 - **Admin screen** (🛡️, header — visible only when signed in): `GET /api/admin/usage` (per-IP requests + tokens today) and `POST /api/admin/blacklist` ({ip, action}). Both gated by the access token (`usage.is_unlimited`).

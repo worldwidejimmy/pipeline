@@ -21,7 +21,7 @@
 > essays plus scraped Roger Ebert reviews, a MusicBrainz agent, and a Tavily web-search agent. A
 > synthesiser node merges their outputs into one grounded answer, streamed to the browser token by
 > token over SSE alongside a typed event protocol that drives a live pipeline visualisation. It runs
-> on a single VPS under Docker Compose behind nginx and Cloudflare, with per-IP quotas and a daily
+> on a single VPS under Docker Compose behind nginx and the CDN, with per-IP quotas and a daily
 > token kill-switch protecting a paid Anthropic key on an open, no-login endpoint."
 
 **What's genuinely hard about it.** Three things, in order. (a) **Routing under ambiguity** — the
@@ -32,7 +32,7 @@ observability through a fan-out** — the frontend renders a live graph, a Gantt
 stream, which means the backend must translate LangGraph's `astream_events` firehose into a stable,
 typed SSE contract while several agents emit interleaved LLM tokens concurrently. (c) **Running a
 paid LLM on an open endpoint** — no login, so the entire defence against financial DoS is layered
-quotas, a global daily call cap, a token hard-cap kill-switch, and origin lock-down via Cloudflare
+quotas, a global daily call cap, a token hard-cap kill-switch, and origin lock-down via the CDN
 mTLS. Retrieval quality, by contrast, is the *least* tuned part of the system: it is now measured
 nightly (T2: hit@k 33/34, MRR 0.79 on a 34-case set), but most index and fusion parameters are
 still defaults (see §5, §10).
@@ -43,8 +43,8 @@ still defaults (see §5, §10).
 
 ```mermaid
 flowchart TD
-    B["Browser — React SPA<br/>EventSource"] -->|HTTPS| CF[Cloudflare]
-    CF -->|mTLS, Authenticated Origin Pulls| HN["host nginx<br/>(sets CF-Connecting-IP from real IP)"]
+    B["Browser — React SPA<br/>EventSource"] -->|HTTPS| CDN["CDN / WAF proxy"]
+    CDN -->|mTLS origin authentication| HN["host nginx<br/>(sets the CDN client-IP header from the real IP)"]
     HN -->|"/"| FE["frontend container nginx :5174<br/>static dist/"]
     HN -->|"/api/*"| FE
     FE -->|"proxy_pass /api → backend:8001<br/>proxy_buffering off"| API["FastAPI / uvicorn :8001<br/>src/main.py"]
@@ -97,11 +97,11 @@ Query: **"Show me good bank heist movies"**, `thread_id=t-123`.
      rolling window (`FREE_LIMIT=10` per `WINDOW_SECONDS=3600`) → site-wide
      `GLOBAL_DAILY_CALL_CAP=30`.
 
-   Client identity comes from `usage.client_ip` (`usage.py:87`): `CF-Connecting-IP` first, then the
+   Client identity comes from `usage.client_ip` (`usage.py:87`): the CDN's client-IP header first, then the
    first hop of `X-Forwarded-For`, then the socket peer. This is the documented gotcha — the
    *frontend container's* nginx clobbers `X-Real-IP` with the Docker gateway address, so
    `X-Real-IP` is worthless. `frontend/nginx-frontend.conf` explicitly re-forwards
-   `CF-Connecting-IP: $http_cf_connecting_ip`, and the host nginx overwrites that header from the
+   the CDN's client-IP header, and the host nginx overwrites that header from the
    real-IP-resolved `$remote_addr` so a client can't spoof it.
 
 2. **`StreamingResponse(_stream_pipeline(...), media_type="text/event-stream")`** with
@@ -677,12 +677,11 @@ bypass ufw. All services `restart: unless-stopped` with json-file logging capped
 Milvus/etcd/minio have healthchecks; `backend` depends on `milvus: service_healthy`.
 
 **Two nginx layers.** The frontend container's nginx proxies `/api/` → `backend:8001` with
-`proxy_buffering off`, `proxy_read_timeout 600s`, and the `CF-Connecting-IP` re-forward. The *host*
-nginx (not fully represented by the repo's `nginx.conf`) terminates Cloudflare traffic. Per
-`SECURITY-AUDIT.md`, the live host config was moved to **443 + Cloudflare Origin cert + Authenticated
-Origin Pulls (`ssl_verify_client on`)**, so only Cloudflare can reach the origin and `CF-Connecting-IP`
+`proxy_buffering off`, `proxy_read_timeout 600s`, and the re-forward of the CDN's client-IP header. The *host*
+nginx (not fully represented by the repo's `nginx.conf`) terminates CDN traffic. Per
+`SECURITY-AUDIT.md`, the live host config was moved to **443 + CDN origin certificate + mTLS origin authentication (`ssl_verify_client on`)**, so only the CDN can reach the origin and the CDN's client-IP header
 is overwritten from the verified `$remote_addr`. The checked-in `nginx.conf` still describes the
-older port-80 / CF-Flexible arrangement — treat it as reference, not truth.
+older port-80 / CDN "flexible" TLS arrangement — treat it as reference, not truth.
 
 ### Ops
 
@@ -747,9 +746,9 @@ older port-80 / CF-Flexible arrangement — treat it as reference, not truth.
 | Retrieval | Hybrid BM25 + dense, RRF k=60 | Dense-only; BM25-only; weighted score fusion | Dense alone misses exact titles/proper nouns; RRF needs no score calibration across incompatible scales | Two ANN searches per query (three with the gate's dense-only score); RRF k is untuned; a cross-encoder reranker was measured and rejected (no held-out recall gain) |
 | Dense index | IVF_FLAT, nlist=128, IP, nprobe=10 | HNSW (M/efConstruction/efSearch); IVF_PQ | Full precision, fast build, adequate at this corpus size | Worse latency/recall curve than HNSW at scale; params are defaults, never swept against the T2 recall set |
 | Embeddings | OpenAI `text-embedding-3-small` (1536-d) | `-3-large` (3072-d); bge/E5 local; Ollama nomic | Cheapest credible quality; re-embedding a large review corpus is the main embedding cost | External dependency + key for what could be local; documented Ollama path doesn't exist in code |
-| Transport | SSE via hand-rolled `StreamingResponse` | WebSocket; long-poll; `sse-starlette` | Unidirectional fits exactly; `EventSource` auto-reconnects; passes Cloudflare with buffering off | No client→server channel (can't cancel a run server-side); token must ride in the URL |
+| Transport | SSE via hand-rolled `StreamingResponse` | WebSocket; long-poll; `sse-starlette` | Unidirectional fits exactly; `EventSource` auto-reconnects; passes the CDN with buffering off | No client→server channel (can't cancel a run server-side); token must ride in the URL |
 | Checkpointer | `MemorySaver` | `SqliteSaver`, `PostgresSaver`, Redis | Zero infra, trivial multi-turn | History lost on restart; blocks horizontal scaling; unbounded thread growth |
-| Abuse control | Per-IP window + global daily cap + token kill-switch + bot heuristic | Login/OAuth; Cloudflare Turnstile; API keys | Keeps the demo genuinely open while capping a paid key | In-memory (single-process); UA heuristic is trivially spoofable; caps make the site refuse real users after 30 searches/day |
+| Abuse control | Per-IP window + global daily cap + token kill-switch + bot heuristic | Login/OAuth; a CAPTCHA/challenge widget; API keys | Keeps the demo genuinely open while capping a paid key | In-memory (single-process); UA heuristic is trivially spoofable; caps make the site refuse real users after 30 searches/day |
 | Corpus refresh | Nightly Wayback scrape + `--skip-existing` ingest | Bulk one-shot; a real ETL orchestrator | Idempotent, resumable, ~90 lines of bash | No Airflow/Dagster; failures only surface via email; no data-quality checks |
 
 ---
@@ -808,7 +807,7 @@ real queue; and Anthropic capacity beyond the default tier.
 Single VPS; single Milvus node (etcd + MinIO both required for it to start); single uvicorn process;
 in-memory conversation state; Anthropic as a hard dependency for every request including the
 `/api/status` ping; OpenAI as a hard dependency for *every* RAG query (query embedding is not
-cached). Cloudflare is a SPOF by design — with Authenticated Origin Pulls enforced, if Cloudflare is
+cached). The CDN is a SPOF by design — with mTLS origin authentication enforced, if the CDN is
 down the origin refuses everything.
 
 ### With real headcount, first three things
@@ -899,7 +898,7 @@ The live open-work list is `TODO.md` at the repo root.
   - The corpus count "17 docs / 168 chunks" was stale (37 markdown files plus the Ebert corpus).
     **Fixed** — replaced with the file count and an explicit note that chunk count is not tracked
     in docs because every re-ingest changes it.
-  - The checked-in `nginx.conf` described port-80 / Cloudflare-Flexible — the exact posture that
+  - The checked-in `nginx.conf` described port-80 / CDN "flexible" TLS — the exact posture that
     was finding SEC-1 — while the live origin is 443 + mTLS. **Fixed** — the file is now clearly
     marked historical/do-not-deploy, since deploying it would silently re-open SEC-1.
   - `frontend/src/types.ts` omitted `music_agent` from `AgentName` and the music routes from
@@ -997,7 +996,7 @@ with a shared helper that *raises*, and the call sites log the offending reply.
 
 **11. Why SSE and not WebSockets?**
 The data flow is strictly server→client. `EventSource` reconnects automatically, and SSE traverses
-Cloudflare with only `proxy_buffering off` and Response Buffering off — WebSockets need extra CF
+the CDN with only `proxy_buffering off` and Response Buffering off — WebSockets need extra CDN
 config and bidirectional overhead I don't use. Two costs I accept: `EventSource` can't set headers,
 so the access token rides in the query string (logged by nginx — SEC-5, accepted); and there's no
 client→server channel, so I can't cancel a running graph server-side.
@@ -1017,17 +1016,17 @@ still succeeds, and a typed `pipeline_error` goes to the UI as a banner. Error t
 deliberate retry policy on every upstream and a circuit breaker.
 
 **14. How do you stop someone draining your Anthropic budget?**
-Four layers. Per-IP rolling window (10 per hour) keyed on `CF-Connecting-IP`; a site-wide
+Four layers. Per-IP rolling window (10 per hour) keyed on the CDN's client-IP header; a site-wide
 `GLOBAL_DAILY_CALL_CAP` of 30 anonymous searches per day; a `DAILY_TOKEN_HARD_CAP` kill-switch that
 pauses anonymous LLM calls when the day's token total is reached; and a User-Agent/Referer bot
 heuristic. Plus a file-backed IP blacklist and a 5-fail/15-minute auth lockout. The load-bearing
 piece is at the edge though: those defences all key on a header, so the real fix was locking the
-origin to Cloudflare with Authenticated Origin Pulls (mTLS, `ssl_verify_client on`) so nobody can
-reach the origin directly and spoof `CF-Connecting-IP`.
+origin to the CDN with mTLS origin authentication (`ssl_verify_client on`) so nobody can
+reach the origin directly and spoof the CDN's client-IP header.
 
 **15. Why is `X-Real-IP` untrustworthy here?**
 Two proxy hops. The frontend container's nginx sets `X-Real-IP` to `$remote_addr`, which by then is
-the Docker gateway. So the only trustworthy identifiers are `CF-Connecting-IP` — which the host nginx
+the Docker gateway. So the only trustworthy identifier is the CDN's client-IP header — which the host nginx
 overwrites from the real-IP-resolved `$remote_addr` so a client can't forge it — and the first hop of
 `X-Forwarded-For`. That's exactly the precedence in `usage.client_ip`.
 
@@ -1163,7 +1162,7 @@ upload** · **feedback → eval-case triage**.
 (the two settings that make streaming actually stream) · **backpressure** (SSE has none at the app
 layer — an async generator writing to a slow client blocks that stream) · **event-loop blocking** /
 **`asyncio.to_thread`** · **rolling-window rate limiting** · **kill-switch / spend cap** ·
-**Authenticated Origin Pulls (mTLS)** · **`CF-Connecting-IP` and trusted-proxy chains** ·
+**mTLS origin authentication** · **CDN client-IP headers and trusted-proxy chains** ·
 **graceful degradation** (Tavily missing → agent returns "unavailable", pipeline still answers).
 
 **Ops:** **healthcheck / `depends_on: service_healthy`** · **derived vs irreplaceable data** (Milvus

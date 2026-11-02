@@ -436,9 +436,9 @@
   <div class="arch-diagram">
     <pre>
 <span class="hl">User (browser)</span>
-    │  HTTPS — Cloudflare CDN + SSL termination
+    │  HTTPS — CDN + TLS termination
     │
-<span class="hl2">Nginx</span>  (reverse proxy, OVH VPS)
+<span class="hl2">Nginx</span>  (reverse proxy, cloud VPS)
     ├── /         → React frontend  (static, port 5174)
     └── /api/*    → FastAPI backend (uvicorn,  port 8001)
                       │
@@ -500,7 +500,7 @@
 
   <h3>FastAPI + Server-Sent Events</h3>
   <p>The backend exposes a single streaming endpoint. It runs the LangGraph pipeline with <code style="font-family:var(--font-mono);font-size:13px;color:var(--amber)">astream_events()</code> and translates internal events — agent lifecycle, LLM tokens, retrieved chunks, TMDB results — into a typed SSE stream consumed by the browser.</p>
-  <div class="info-box"><strong>Why SSE over WebSockets?</strong> SSE is unidirectional (server → client), matching this use case exactly. It works through Cloudflare without configuration, and <code style="font-family:var(--font-mono);font-size:13px">EventSource</code> in the browser auto-reconnects on drop. WebSockets add bidirectional protocol overhead that is unnecessary here.</div>
+  <div class="info-box"><strong>Why SSE over WebSockets?</strong> SSE is unidirectional (server → client), matching this use case exactly. It works through the CDN without configuration, and <code style="font-family:var(--font-mono);font-size:13px">EventSource</code> in the browser auto-reconnects on drop. WebSockets add bidirectional protocol overhead that is unnecessary here.</div>
 
   <h3>React + TypeScript Frontend</h3>
   <p>The frontend is a Vite SPA that maintains a live <code style="font-family:var(--font-mono);font-size:13px;color:var(--amber)">EventSource</code> connection per query. It is laid out as a chat, and every answer carries a <strong>step trace</strong>: the follow-up rewrite, the knowledge-base verdict and how it was decided, the routing, each source's result, the free lookups vs. Claude calls (purpose, tokens in/out), what the combiner received, any links the guardrail removed, and the model. Older turns fold to a one-line summary. An optional panel (⚡) adds an animated <strong>pipeline graph</strong>, a <strong>Gantt timeline</strong>, a <strong>typed event log</strong> and a <strong>context panel</strong>; a <strong>🧪 Evals &amp; ops</strong> panel shows the eval tiers, scheduled jobs and ingest history. The AI process is visible, not a black box.</p>
@@ -588,7 +588,7 @@
       <div class="innovation-icon">🚀</div>
       <div class="innovation-body">
         <strong>Production deployment</strong>
-        <span>Full Docker Compose stack on OVH VPS: Milvus + etcd + MinIO + FastAPI + React. Nginx reverse proxy. Cloudflare for SSL, CDN, and DDoS protection. Live at smartmoviesearch.com.</span>
+        <span>Full Docker Compose stack on a cloud VPS: Milvus + etcd + MinIO + FastAPI + React. Nginx reverse proxy. A CDN/WAF proxy for TLS, caching and DDoS protection. Live at smartmoviesearch.com.</span>
       </div>
     </div>
   </div>
@@ -613,7 +613,7 @@
       <tr><td>Web search</td><td>Tavily API</td><td>Current web results as a third retrieval source</td></tr>
       <tr><td>Backend</td><td>FastAPI + uvicorn</td><td>Async SSE streaming, typed event protocol</td></tr>
       <tr><td>Frontend</td><td>React + TypeScript + Vite</td><td>Chat UI with per-answer step trace, optional pipeline visualisation, dark/light theme</td></tr>
-      <tr><td>Infrastructure</td><td>Docker Compose + Nginx + Cloudflare</td><td>Containerised deployment, reverse proxy, SSL termination, CDN</td></tr>
+      <tr><td>Infrastructure</td><td>Docker Compose + Nginx + CDN</td><td>Containerised deployment, reverse proxy, SSL termination, CDN</td></tr>
     </tbody>
   </table>
 

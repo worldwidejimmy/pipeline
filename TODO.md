@@ -44,4 +44,4 @@ own roadmaps. Finished work is recorded in the docs and the git history, not her
 
 - [ ] **SEC-3: Anthropic spend limit.** Set a monthly limit and usage alerts in the Anthropic
   console (the in-app daily token and call caps already help). See `cineai/SECURITY-AUDIT.md`.
-- [ ] **Optional:** Cloudflare Bot Fight Mode.
+- [ ] **Optional:** turn on the CDN's bot protection.
