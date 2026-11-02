@@ -6,7 +6,8 @@
 # and fails when the outgoing change contains:
 #   1. files that should never be published (.env, keys, certs, archives, DBs,
 #      the visitor-IP blacklist, ops logs)
-#   2. added lines matching well-known secret formats (API keys, JWTs, private keys)
+#   2. added lines matching well-known secret formats (API keys, JWTs, private keys),
+#      personal info (emails, phone numbers), and, in docs, hosting/CDN vendor names
 #   3. added lines matching PRIVATE patterns from ~/.config/sms-repo-guard/patterns.txt
 #      — personal names/domains/server IPs live in that file, OUTSIDE the repo,
 #      precisely so the blocklist itself is never published.
@@ -99,6 +100,19 @@ check "phone-number-looking string"  '\([0-9]{3}\) ?[0-9]{3}[-. ][0-9]{4}|(^|[^0
 
 # Box-default / hostname-revealing identities anywhere in content
 check "server-identifying account/hostname" 'ubuntu@vps|root@vps|@vps-[0-9a-f]+|\.vps\.ovh\.'
+
+# ── 2c. Infrastructure vendor names in DOCS (added lines) ─────────────────────
+# Docs say "cloud VPS" / "CDN", never which provider (list: .githooks/infra-vendors.sh).
+# Only documentation files are checked; code must keep real identifiers.
+. "$(dirname "$0")/infra-vendors.sh"
+doc_added=$(git diff -U0 --diff-filter=ACMR "$@" -- ':(top,glob)**/*.md' ':(top,glob)**/*.html' \
+            ':(top,glob)**/*.txt' ':(top,glob)**/*.rst' ':(top,exclude).githooks' \
+            | grep -E '^\+' | grep -vE '^\+\+\+' | sed 's/^+//' || true)
+vendor_hits=$(printf '%s\n' "$doc_added" | grep -niE -- "$INFRA_VENDORS" | head -3 || true)
+if [ -n "$vendor_hits" ]; then
+  say "hosting/CDN vendor named in docs (use a generic term: \"cloud VPS\", \"CDN\"):"
+  printf '%s\n' "$vendor_hits" | sed 's/^/    /' >&2
+fi
 
 # ── 3. Private local patterns (kept OUTSIDE the repo) ─────────────────────────
 priv="$HOME/.config/sms-repo-guard/patterns.txt"

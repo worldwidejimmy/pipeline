@@ -11,6 +11,12 @@ if grep -qE 'ubuntu@vps|@vps-[0-9a-f]+|\.vps\.ovh\.' "$msg_file"; then
   fail=1
 fi
 
+. "$(dirname "$0")/infra-vendors.sh"
+if grep -v '^#' "$msg_file" | grep -qiE -- "$INFRA_VENDORS"; then
+  echo "🛑 public-repo guard (commit-msg): message names a hosting/CDN vendor; use a generic term (\"cloud VPS\", \"CDN\")." >&2
+  fail=1
+fi
+
 priv="$HOME/.config/sms-repo-guard/patterns.txt"
 if [ -f "$priv" ]; then
   while IFS= read -r p; do
