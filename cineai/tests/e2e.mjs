@@ -138,6 +138,35 @@ try {
 } catch (e) { fail('follow-up flow', String(e).slice(0, 200)) }
 await page.screenshot({ path: SHOT('3-follow-up') })
 
+// ── 4c. Prompt & response for each step (free: already in the stream) ────────
+console.log('\n[4c] Prompt & response per step')
+try {
+  const last = page.locator('.history-turn').last()
+  const io = last.locator('.step-io')
+  const n = await io.count()
+  await io.first().locator('> summary').click()
+  const roles = await io.first().locator('.step-io-block > summary').allInnerTexts()
+  const ok = roles.some(t => /Prompt: system message/.test(t)) && roles.some(t => /Claude's response/.test(t))
+  ok ? pass('steps show their prompt & response', `${n} steps expandable`) : fail('prompt & response', roles.join(' | ').slice(0, 160))
+  const data = await last.locator('.step-io-data').count()
+  data > 0 ? pass('source data shown (what the API returned)') : fail('source data', 'no .step-io-data block')
+} catch (e) { fail('prompt & response', String(e).slice(0, 200)) }
+
+// ── 4d. Chat history: New chat keeps the old one (free: no search) ─────────────
+console.log('\n[4d] Chat history')
+try {
+  await page.click('.new-chat-btn')
+  const left = await page.locator('.history-turn').count()
+  const btn = page.locator('.chats-menu > button')
+  const label = await btn.innerText()
+  left === 0 && /Chats \(\d+\)/.test(label) ? pass('New chat keeps the old one', label) : fail('new chat', `${left} turns, "${label}"`)
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await btn.click()
+  await page.locator('.chats-open').first().click()
+  const back = await page.locator('.history-turn').count()
+  back === 2 ? pass('old chat reopens after a reload', `${back} turns`) : fail('reopen chat', `${back} turns`)
+} catch (e) { fail('chat history', String(e).slice(0, 200)) }
+
 // ── 5. Pipeline panel (optional, ⚡) + observability tabs ─────────────────────
 console.log('\n[5] Pipeline panel + observability tabs')
 try {

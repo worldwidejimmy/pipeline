@@ -700,7 +700,7 @@ older port-80 / CDN "flexible" TLS arrangement — treat it as reference, not tr
   `LinkGuard` gives the same output for any chunking of the stream), the KB gate's bands and
   fan-out adjustment, the MCP server (JWT verifier, tool snapshot), tracing redaction, feedback,
   ops log parsing, the eval harness itself, LLM-output contracts (`parse_llm_json`), model
-  resolution and request params. `make test-e2e` → a 30-check Playwright/Chromium suite
+  resolution and request params. `make test-e2e` → a 34-check Playwright/Chromium suite
   (`tests/e2e.mjs`) against the running stack: homepage, trending cards, a real SSE search (costs a
   credit and real tokens), usage accounting, modals, theme, and the anti-bot guard rejecting
   headless UAs. **Honest scope:** the graph, the agents and the Milvus retriever have almost no

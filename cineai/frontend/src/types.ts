@@ -64,6 +64,16 @@ export interface LlmEndEvent {
   prompt_tokens: number;
   completion_tokens: number;
   cache_read_tokens?: number;
+  prompt?: { role: string; text: string }[];   // the messages Claude received
+  response?: string | null;                     // its reply (null for the answer itself)
+  ts: number;
+}
+
+/** What a source's API returned, as JSON text (shown on demand in the step trace). */
+export interface SourceDataEvent {
+  type: 'source_data';
+  agent: AgentName;
+  data: string;
   ts: number;
 }
 
@@ -158,6 +168,7 @@ export type PipelineEvent =
   | LlmStartEvent
   | TokenEvent
   | LlmEndEvent
+  | SourceDataEvent
   | ChunksRetrievedEvent
   | TmdbResultsEvent
   | KbLookupEvent

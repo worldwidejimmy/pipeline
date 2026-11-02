@@ -2025,6 +2025,22 @@ html, body, #root {
   font: inherit; font-style: italic; color: var(--text-muted);
 }
 .step-toggle:hover { color: var(--text); }
+/* "Show prompt & response": where each piece of text came from. Left border = origin:
+   cyan = a source's data, indigo = what we sent Claude, purple = what Claude wrote. */
+.step-io { font-style: normal; margin: 2px 0 4px; }
+.step-io > summary { cursor: pointer; font-size: 11px; color: var(--indigo-light); width: fit-content; }
+.step-io > summary:hover { text-decoration: underline; }
+.step-io-call { margin-top: 6px; }
+.step-io-head { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-muted); margin: 4px 0 2px; }
+.step-io-block { margin: 3px 0; border-left: 2px solid var(--indigo); padding-left: 8px; }
+.step-io-block > summary { cursor: pointer; font-size: 11px; color: var(--text-muted); }
+.step-io-data { border-left-color: var(--cyan); }
+.step-io-response { border-left-color: var(--purple); }
+.step-io-block pre {
+  margin: 3px 0 0; padding: 8px; max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.45; color: var(--text);
+  background: var(--surface2); border-radius: 6px;
+}
 @keyframes step-in { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
 @keyframes step-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .step, .step--run .step-mark::before { animation: none; } }
@@ -2075,3 +2091,22 @@ html, body, #root {
 .ops-flow { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; line-height: 1.55; color: var(--text-muted); }
 .ops-flow strong { color: var(--text); }
 .site-footer { flex-shrink: 0; text-align: center; font-size: 10.5px; color: var(--text-muted); padding: 6px 0 8px; }
+
+/* ── 🕘 Chats: earlier conversations, saved in this browser ─────────────────── */
+.chats-menu { position: relative; }
+.chats-list {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 50; width: min(340px, calc(100vw - 32px));
+  max-height: 60vh; overflow-y: auto; padding: 6px; background: var(--surface); border: 1px solid var(--border-lit);
+  border-radius: var(--radius); box-shadow: var(--shadow-md);
+}
+.chats-note { font-size: 10.5px; color: var(--text-muted); padding: 2px 6px 6px; }
+.chats-item { display: flex; align-items: stretch; border-radius: 6px; }
+.chats-item:hover, .chats-item--on { background: var(--surface2); }
+.chats-open {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; text-align: left;
+  background: none; border: none; padding: 6px 8px; cursor: pointer; color: var(--text); font: inherit;
+}
+.chats-title { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chats-meta { font-size: 10.5px; color: var(--text-muted); }
+.chats-del { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0 8px; font-size: 11px; }
+.chats-del:hover { color: var(--red); }

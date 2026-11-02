@@ -277,7 +277,9 @@ LLM events are attributed to the LangGraph node that really made the call (`lang
 metadata), so parallel agents' calls and tokens are no longer mixed up. The UI turns these
 events into each answer's step trace: free lookups vs. Claude calls (purpose, tokens in/out)
 per step, what the combiner received, and the model. Older turns fold to one line:
-sources · seconds · tokens in (cached %) / out · model.
+sources · seconds · tokens in (cached %) / out · model. Each step expands to show exactly what
+went in and out: the source's raw data, every Claude call's prompt and Claude's reply. Earlier
+chats stay under 🕘 Chats (saved in the browser).
 
 ### 5. Synthesis
 

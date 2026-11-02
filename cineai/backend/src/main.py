@@ -113,6 +113,31 @@ _PRE_NODES = {"understand", "kb_lookup", "supervisor_route"}   # not "sources" i
 _domain = guardrails._domain          # bare host of a URL, for the UI's step trace
 
 
+# Prompt/response transparency (the step trace's "show prompt & response"): each Claude
+# call's messages and reply, and each source's raw data, capped so one answer's stream
+# stays small. Shown as plain text (never rendered as links). Model replies pass the same
+# link allow-list as the answer; third-party data passes clean(), as it does into prompts.
+_IO_CAP = 12_000
+_ROLE = {"system": "system", "human": "user", "ai": "assistant"}
+
+
+def _cap(text: str, cap: int = _IO_CAP) -> str:
+    return text if len(text) <= cap else text[:cap] + f"\n… [{len(text) - cap:,} more characters not shown]"
+
+
+def _io_messages(inp: dict | None) -> list[dict]:
+    msgs = (inp or {}).get("messages") or []
+    if msgs and isinstance(msgs[0], list):          # chat models get a batch: [[...]]
+        msgs = msgs[0]
+    return [{"role": _ROLE.get(getattr(m, "type", ""), getattr(m, "type", "?")),
+             "text": _cap(text_of(getattr(m, "content", "")))} for m in msgs]
+
+
+def _io_data(obj) -> str:
+    return _cap(guardrails.clean(json.dumps(obj, indent=1, ensure_ascii=False, default=str),
+                                 limit=50_000), 8_000)
+
+
 def _sse(event_type: str, payload: dict) -> str:
     payload["ts"] = int(time.time() * 1000)
     return f"event: {event_type}\ndata: {json.dumps(payload)}\n\n"
@@ -157,6 +182,7 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
     link_guards: dict[str, guardrails.LinkGuard] = {}
     final_parts: list[str] = []     # the answer exactly as streamed (post-guard), for feedback
     routing: str | None = None
+    llm_inputs: dict[str, list[dict]] = {}   # run id → the call's prompt messages
 
     yield _sse("pipeline_start", {
         "question":    question,
@@ -211,6 +237,13 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
                     yield _sse("routing_decision", {"routing": routing, "agent": ename,
                                                     "by": output.get("routing_by", "model")})
 
+                # What each source returned (shown on demand in the step trace).
+                raw_src = {"tmdb_agent": "_tmdb_raw", "music_agent": "_music_raw",
+                           "search_agent": "_search_results"}.get(ename)
+                if raw_src and output.get(raw_src):
+                    yield _sse("source_data", {"agent": ename,
+                                               "data": _io_data(output[raw_src])})
+
                 if ename == "rag_agent":
                     chunks = output.get("_rag_chunks", [])
                     if chunks:
@@ -256,6 +289,7 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
             # in parallel, so "the last node that started" would misattribute tokens.)
             elif etype == "on_chat_model_start":
                 node = (event.get("metadata") or {}).get("langgraph_node") or current_agent
+                llm_inputs[event.get("run_id", "")] = _io_messages(data.get("input"))
                 yield _sse("llm_start", {
                     "agent": node,
                     "model": event.get("name", "claude"),
@@ -316,6 +350,11 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
                     "prompt_tokens":     prompt_t,
                     "completion_tokens": compl_t,
                     "cache_read_tokens": c_read,
+                    "prompt":            llm_inputs.pop(event.get("run_id", ""), []),
+                    # The answer's own text is already on screen; agents' replies aren't.
+                    "response":          None if final else
+                                         _cap(guardrails.filter_links(
+                                             text_of(getattr(output, "content", "")), search_urls)),
                 })
 
     except Exception as exc:

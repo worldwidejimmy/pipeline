@@ -37,6 +37,10 @@ own roadmaps. Finished work is recorded in the docs and the git history, not her
   first, then give those provider ranges a shared, larger bucket (or rely on the global cap).
 - [ ] **Remaining blocking calls in async code:** `_has_hybrid_schema()` runs
   `describe_collection` on every query (cache it), and the Tavily client is synchronous.
+- [ ] **Durable conversation memory.** The server keeps chat memory in RAM (`MemorySaver`), so
+  a follow-up in a chat reopened from 🕘 Chats after a backend restart loses the earlier turns,
+  and memory grows until restart. Use a persistent checkpointer with a TTL (e.g. SQLite or
+  Redis), or send the reopened chat's prior turns with the question.
 - [ ] **CI, optional (owner):** load the private guard patterns and approved identity as GitHub
   secrets (CI runs generic checks without them); optionally a branch ruleset requiring checks.
 

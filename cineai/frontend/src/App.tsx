@@ -14,6 +14,7 @@ import { UsageBadge } from './components/UsageBadge'
 import { StepTrace } from './components/StepTrace'
 import { OpsModal } from './components/OpsModal'
 import { FeedbackBar } from './components/FeedbackBar'
+import { Turn, Chat, loadChats, saveChats, ago } from './chatStore'
 import { getAccessToken, clearAccessToken, apiFetch, makeSSEUrl, fetchUsage } from './api'
 
 const EXAMPLE_QUERIES = [
@@ -27,16 +28,10 @@ const EXAMPLE_QUERIES = [
 
 type ObsTab = 'graph' | 'timeline' | 'events' | 'context'
 
-interface Turn {
-  q: string
-  a: string
-  runId?: string             // server's answer id, for 👍/👎
-  events: PipelineEvent[]    // the turn's pipeline steps (tokens excluded), kept for its step trace
-}
 
 // Events that describe a step (everything except the token stream).
 const STEP_EVENTS = ['pipeline_start', 'rewrite', 'kb_lookup', 'agent_start', 'agent_end', 'routing_decision',
-  'chunks_retrieved', 'tmdb_results', 'music_results', 'search_results', 'guardrail', 'llm_start', 'llm_end', 'done'] as const
+  'chunks_retrieved', 'tmdb_results', 'music_results', 'search_results', 'guardrail', 'llm_start', 'llm_end', 'source_data', 'done'] as const
 
 function loadPref(key: string, fallback: boolean): boolean {
   try { const v = localStorage.getItem(key); return v === null ? fallback : v === '1' } catch { return fallback }
@@ -68,6 +63,8 @@ export default function App() {
   // The pipeline graph/timeline/events panel: optional now that the chat shows each step.
   const [showPipeline,  setShowPipeline]  = useState(() => loadPref('sms-pipeline-panel', false))
   const [pendingQ,      setPendingQ]      = useState('')   // the question being answered (input clears on send)
+  const [chats,         setChats]         = useState<Chat[]>(loadChats)   // saved in this browser
+  const [showChats,     setShowChats]     = useState(false)
 
   // Open-access usage / sign-in
   const [usage,      setUsage]      = useState<Usage | null>(null)
@@ -89,7 +86,7 @@ export default function App() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { setShowKnowledge(false); setShowStatus(false); setShowRules(false); setShowOps(false)}
+      if (e.key === 'Escape') { setShowKnowledge(false); setShowStatus(false); setShowRules(false); setShowOps(false); setShowChats(false) }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
@@ -119,8 +116,40 @@ export default function App() {
     refreshUsage()
   }, [token, refreshUsage])
 
+  // Every finished turn saves the chat (this browser only), so "New chat" never loses one.
+  useEffect(() => {
+    if (!history.length) return
+    setChats(prev => {
+      const old = prev.find(c => c.id === threadId)
+      if (old && old.turns.length === history.length) return prev   // just reopened, nothing new
+      const chat: Chat = { id: threadId, title: old?.title ?? history[0].q, updated: Date.now(), turns: history }
+      const next = [chat, ...prev.filter(c => c.id !== threadId)]
+      saveChats(next)
+      return next
+    })
+  }, [history, threadId])
+
+  const openChat = useCallback((c: Chat) => {
+    esRef.current?.close()
+    setThreadId(c.id)
+    setHistory(c.turns)
+    setEvents(c.turns[c.turns.length - 1]?.events ?? [])
+    setAnswer('')
+    setQuery('')
+    setStream(false)
+    setTurnNum(c.turns.length)
+    setPendingQ('')
+    setShowChats(false)
+    setTimeout(() => inputRef.current?.focus(), 0)
+  }, [])
+
+  const deleteChat = useCallback((id: string) => {
+    setChats(prev => { const next = prev.filter(c => c.id !== id); saveChats(next); return next })
+  }, [])
+
   const startNewConversation = useCallback(() => {
     esRef.current?.close()
+    setShowChats(false)
     setThreadId(generateThreadId())
     setHistory([])
     setEvents([])
@@ -445,10 +474,38 @@ export default function App() {
             >
               {theme === 'dark' ? '☀️' : '🌙'}
             </button>
+            {chats.length > 0 && (
+              <div className="chats-menu">
+                <button
+                  className="header-btn-labeled"
+                  onClick={() => setShowChats(v => !v)}
+                  disabled={isStreaming}
+                  title="Your earlier chats (saved in this browser only)"
+                  aria-expanded={showChats}
+                >
+                  🕘 Chats ({chats.length})
+                </button>
+                {showChats && (
+                  <div className="chats-list" role="menu">
+                    <div className="chats-note">Saved in this browser only</div>
+                    {chats.map(c => (
+                      <div key={c.id} className={`chats-item ${c.id === threadId ? 'chats-item--on' : ''}`}>
+                        <button className="chats-open" role="menuitem" onClick={() => openChat(c)}>
+                          <span className="chats-title">{c.title}</span>
+                          <span className="chats-meta">{c.turns.length} turn{c.turns.length !== 1 ? 's' : ''} · {ago(c.updated)}</span>
+                        </button>
+                        <button className="chats-del" onClick={() => deleteChat(c.id)}
+                          title="Delete this chat" aria-label={`Delete chat: ${c.title}`}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             <button
               className="new-chat-btn"
               onClick={startNewConversation}
-              title="Start a new conversation"
+              title="Start a new conversation (this one stays under 🕘 Chats)"
             >
               + New chat
             </button>

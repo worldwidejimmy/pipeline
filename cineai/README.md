@@ -231,7 +231,11 @@ as a chip, e.g. `tmdb+rag`, plus any knowledge-base adjustment), each source's r
 source chip (themoviedb.org, Milvus vector DB, Tavily API, MusicBrainz), per step the free
 lookups vs. Claude calls with purpose and tokens in/out, what the combiner received, guardrail
 link removals and the model. Older turns fold to one line: sources · seconds · tokens in
-(cached %) / out · model.
+(cached %) / out · model. **Show prompt & response** under a step opens exactly what went in
+and out: the source's raw data (cyan), each Claude call's system and user messages (indigo) and
+Claude's reply (purple), so you can see which words came from TMDB, MusicBrainz, the web or the
+knowledge base and which from Claude. **🕘 Chats** keeps earlier conversations (in this browser
+only); "+ New chat" never discards one.
 
 **🧪 Evals & ops** (header): each eval tier (what / how / when / latest); scheduled jobs (UTC and
 local time, what each does, whether it uses an LLM, last run); ingest & embeddings (source →

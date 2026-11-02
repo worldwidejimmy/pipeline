@@ -151,7 +151,12 @@ agent_end (×N) → [guardrail] → done
 
 LLM events are attributed to their real LangGraph node via the `langgraph_node` metadata
 (parallel agents used to be misattributed). The frontend renders these as each answer's
-step trace (`StepTrace.tsx`).
+step trace (`StepTrace.tsx`). Each `llm_end` also carries the call's `prompt` (messages, each
+capped at 12k chars) and `response` (link allow-listed; `null` for the answer itself), and a
+`source_data` event carries what TMDB / MusicBrainz / Tavily returned (`clean()`ed JSON, capped
+at 8k): the trace's "Show prompt & response". About 80 KB of stream per answer; nothing is stored
+server-side. Chats are saved in the browser's localStorage (`frontend/src/chatStore.ts`: 30 chats,
+the newest 5 with full prompt detail).
 
 **Important — LangChain event API (1.2+):** `main.py` listens for `on_chat_model_*`
 events (`on_chat_model_start`, `on_chat_model_stream`, `on_chat_model_end`), NOT the
@@ -251,7 +256,7 @@ make test-e2e          # installs playwright + chromium on first run
 E2E_LIVE=1 make test-e2e      # additionally checks https://smartmoviesearch.com through the CDN
 ```
 
-It exercises the real UI end to end (30 checks) — homepage, trending, a full agent-pipeline
+It exercises the real UI end to end (34 checks) — homepage, trending, a full agent-pipeline
 search with SSE streaming (costs 2 free-quota searches + real Claude tokens: a question and a follow-up), the step trace,
 the folded summary line, the docked question box, a follow-up turn that must resolve "its",
 the optional pipeline panel, usage accounting, modals incl. Evals & ops, the footer, theme — and verifies the anti-bot guard rejects headless user agents. Note when
@@ -774,7 +779,8 @@ Graph: `understand → kb_lookup → supervisor_route → [tmdb|rag|search|music
   Music Composer.
 - **UI:** chat layout; each answer has a step trace (`StepTrace.tsx`); older turns fold to one
   line (sources · seconds · tokens in (cached %) / out · model). The graph/timeline/events panel
-  is behind ⚡. The compare toggle is gone from the UI; `/api/compare` stays.
+  is behind ⚡. The compare toggle is gone from the UI; `/api/compare` stays. Each step expands
+  to its prompt & response and source data; 🕘 Chats lists earlier chats (browser-only).
 
 ## Evals & ops panel (2026-11-02)
 

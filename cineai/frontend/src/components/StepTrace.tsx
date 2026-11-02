@@ -46,10 +46,19 @@ function titles(chunks: Passage[], n = 3): string {
   return t.slice(0, n).join('; ') + (t.length > n ? ` + ${t.length - n} more` : '')
 }
 
+interface LlmCall { prompt: { role: string; text: string }[]; response?: string | null; inp: number; out: number }
 interface Step {
   key: string; text: string; detail?: string; state: 'run' | 'ok' | 'none' | 'warn'; ms?: number
   route?: string      // the router's raw decision, as a chip (same look as the Routing Rules screen)
   src?: string        // the step's data source / tool, as a chip
+  calls?: LlmCall[]   // each Claude call's prompt and reply (expandable)
+  data?: { label: string; text: string }   // what the source returned (expandable)
+}
+
+// What to call each source's raw data in the expandable panel.
+const DATA_LABEL: Record<string, string> = {
+  kb_lookup: 'Useful passages from Milvus (with their similarity)', tmdb_agent: 'What the TMDB API returned',
+  music_agent: 'What the MusicBrainz API returned', search_agent: 'What the Tavily web search returned',
 }
 
 // Same names as the Routing Rules screen's agent cards (backend /api/rules).
@@ -89,6 +98,17 @@ export function buildSteps(events: PipelineEvent[]): { steps: Step[]; summary: s
     if (e.type !== 'llm_end') continue
     const t = (tok[e.agent] ??= { inp: 0, out: 0, calls: 0 })
     t.inp += e.prompt_tokens; t.out += e.completion_tokens; t.calls++
+  }
+
+  // Each Claude call's prompt and reply, and each source's raw data, per node.
+  const calls: Record<string, LlmCall[]> = {}
+  const data: Record<string, string> = {}
+  for (const e of events) {
+    if (e.type === 'llm_end' && e.prompt?.length)
+      (calls[e.agent] ??= []).push({ prompt: e.prompt, response: e.response, inp: e.prompt_tokens, out: e.completion_tokens })
+    else if (e.type === 'source_data') data[e.agent] = e.data
+    else if (e.type === 'kb_lookup' && e.chunks.length)
+      data.kb_lookup = e.chunks.map(c => `── ${c.source} · similarity ${c.similarity.toFixed(2)}\n${c.text ?? ''}`).join('\n\n')
   }
 
   const ran = new Set<string>()
@@ -180,6 +200,11 @@ export function buildSteps(events: PipelineEvent[]): { steps: Step[]; summary: s
     s.detail = s.detail ? `${s.detail}\n${spent}` : spent
   }
 
+  for (const s of steps) {
+    if (calls[s.key]) s.calls = calls[s.key]
+    if (data[s.key]) s.data = { label: DATA_LABEL[s.key] ?? 'What the source returned', text: data[s.key] }
+  }
+
   const done = events.find(e => e.type === 'done')
   if (done && done.type === 'done') {
     if (synth && done.model) synth.src = done.model
@@ -221,6 +246,7 @@ export function StepTrace({ events, live = false, latest = false }:
                   {s.src && <span className="rules-agent-source step-chip">{s.src}</span>}
                 </span>
                 {s.detail && <span className="step-detail">{s.detail}</span>}
+                {(s.calls || s.data) && <StepIO step={s} />}
               </span>
               {s.ms !== undefined && s.state !== 'run' && <span className="step-ms">{(s.ms / 1000).toFixed(1)}s</span>}
             </li>
@@ -228,5 +254,40 @@ export function StepTrace({ events, live = false, latest = false }:
         </ol>
       )}
     </div>
+  )
+}
+
+/** "Show what went in and out": the source's raw data, then each Claude call's prompt
+ *  (system, user, …) and its reply, so a visitor can see which words came from Claude
+ *  and which from TMDB, MusicBrainz, the web or the knowledge base. Plain text only. */
+function StepIO({ step }: { step: Step }) {
+  const n = step.calls?.length ?? 0
+  const label = [step.data && 'source data', n && `${n > 1 ? `${n} ` : ''}prompt${n > 1 ? 's' : ''} & response${n > 1 ? 's' : ''}`]
+    .filter(Boolean).join(' · ')
+  return (
+    <details className="step-io">
+      <summary>Show {label}</summary>
+      {step.data && (
+        <details className="step-io-block step-io-data" open>
+          <summary>{step.data.label}</summary>
+          <pre>{step.data.text}</pre>
+        </details>
+      )}
+      {step.calls?.map((c, i) => (
+        <div key={i} className="step-io-call">
+          <div className="step-io-head">Claude call {n > 1 ? `${i + 1} of ${n}` : ''} · {fmt(c.inp)} in / {fmt(c.out)} out tokens</div>
+          {c.prompt.map((m, j) => (
+            <details key={j} className={`step-io-block step-io-${m.role}`} open={m.role !== 'system'}>
+              <summary>Prompt: {m.role} message · {fmt(m.text.length)} chars</summary>
+              <pre>{m.text}</pre>
+            </details>
+          ))}
+          <details className="step-io-block step-io-response" open>
+            <summary>Claude's response</summary>
+            <pre>{c.response ?? '(the answer itself, shown in the chat)'}</pre>
+          </details>
+        </div>
+      ))}
+    </details>
   )
 }
