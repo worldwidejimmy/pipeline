@@ -2,12 +2,16 @@
 LangGraph pipeline for CineAI.
 
 Flow:
-  START → supervisor_route → conditional dispatch →
-    [tmdb_agent] [rag_agent] [search_agent] (subset or all, fan-out) →
+  START → understand (rewrite a follow-up as a standalone question; no LLM on a first question)
+        → kb_lookup (knowledge base first, calibrated relevance gate)
+        → supervisor_route → conditional dispatch →
+    [tmdb_agent] [rag_agent] [search_agent] [music_agent] (subset, fan-out) →
   synthesise → END
 
 State keys:
-  question      – current user question
+  question      – the question the agents work on (standalone rewrite of a follow-up)
+  user_question – the user's own words (the answer and the history use these)
+  kb            – kb_lookup result: relevant?, passages, scores
   history       – list of previous {q, a} turns (last 10 kept)
   routing       – supervisor decision: tmdb|rag|search|tmdb+rag|etc.
   tmdb_result   – formatted output from TMDB agent
@@ -24,6 +28,9 @@ from langgraph.checkpoint.memory import MemorySaver
 from typing_extensions import TypedDict
 
 from src.agents.supervisor import supervisor_route_node
+from src.agents.understand import understand_node
+from src.agents.kb_lookup import kb_lookup_node
+from src.kb_gate import apply_kb
 from src.agents.tmdb_agent import tmdb_agent_node
 from src.agents.rag_agent import rag_agent_node
 from src.agents.search_agent import search_agent_node
@@ -35,6 +42,8 @@ from src.agents.synthesiser import synthesise_node
 
 class CineState(TypedDict, total=False):
     question: str
+    user_question: str
+    kb: dict
     history: list[dict]        # [{"q": "...", "a": "..."}] — last 10 turns
     routing: str
     routing_by: str            # "keyword" (deterministic rule) or "model" (LLM classifier)
@@ -62,7 +71,9 @@ def _dispatch(state: CineState) -> list[str]:
         "rag+search":    ["rag_agent", "search_agent"],
         "all":           ["tmdb_agent", "rag_agent", "search_agent", "music_agent"],
     }
-    return mapping.get(routing, ["tmdb_agent"])
+    agents = list(mapping.get(routing, ["tmdb_agent"]))
+    return apply_kb(agents, (state.get("kb") or {}).get("relevant"))
+
 
 
 # ── Singletons ────────────────────────────────────────────────────────────────
@@ -77,6 +88,8 @@ def build_pipeline():
     """Compile and return the LangGraph pipeline with memory checkpointer."""
     g = StateGraph(CineState)
 
+    g.add_node("understand",       understand_node)
+    g.add_node("kb_lookup",        kb_lookup_node)
     g.add_node("supervisor_route", supervisor_route_node)
     g.add_node("tmdb_agent",       tmdb_agent_node)
     g.add_node("rag_agent",        rag_agent_node)
@@ -84,7 +97,9 @@ def build_pipeline():
     g.add_node("music_agent",      music_agent_node)
     g.add_node("synthesise",       synthesise_node)
 
-    g.add_edge(START, "supervisor_route")
+    g.add_edge(START, "understand")
+    g.add_edge("understand", "kb_lookup")
+    g.add_edge("kb_lookup", "supervisor_route")
 
     g.add_conditional_edges(
         "supervisor_route",

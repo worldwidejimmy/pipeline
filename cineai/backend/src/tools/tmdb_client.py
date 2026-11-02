@@ -94,6 +94,10 @@ async def search_movies(query: str, page: int = 1) -> dict[str, Any]:
     }
 
 
+_CREW_JOBS = ("Director", "Screenplay", "Writer", "Original Music Composer", "Director of Photography",
+              "Editor", "Producer", "Executive Producer")
+
+
 async def get_movie_details(movie_id: int, media_type: str = "movie") -> dict[str, Any]:
     """Fetch full details + credits for a movie or TV show."""
     t0 = time.time()
@@ -110,11 +114,13 @@ async def get_movie_details(movie_id: int, media_type: str = "movie") -> dict[st
         {"name": c["name"], "character": c["character"], "order": c["order"]}
         for c in data.get("credits", {}).get("cast", [])[:10]
     ]
-    crew = [
-        {"name": c["name"], "job": c["job"]}
-        for c in data.get("credits", {}).get("crew", [])
-        if c["job"] in ("Director", "Producer", "Screenplay", "Writer", "Executive Producer")
-    ][:8]
+    # Key creative roles first: producers used to fill every slot, so "who composed the
+    # score?" came back unanswered for films like Inception (many producers).
+    crew = sorted(
+        ({"name": c["name"], "job": c["job"]}
+         for c in data.get("credits", {}).get("crew", []) if c["job"] in _CREW_JOBS),
+        key=lambda c: _CREW_JOBS.index(c["job"]),
+    )[:10]
     similar = [_fmt_movie(s) for s in data.get("similar", {}).get("results", [])[:5]]
 
     return {

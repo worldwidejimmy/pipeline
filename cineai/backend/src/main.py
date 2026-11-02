@@ -103,8 +103,10 @@ def _looks_like_bot(request: Request) -> bool:
 
 
 _AGENT_NODES = {
+    "understand", "kb_lookup",
     "supervisor_route", "tmdb_agent", "rag_agent", "search_agent", "music_agent", "synthesise"
 }
+_PRE_NODES = {"understand", "kb_lookup", "supervisor_route"}   # not "sources" in agents_used
 
 
 _domain = guardrails._domain          # bare host of a URL, for the UI's step trace
@@ -147,7 +149,6 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
     cache_read_tokens: int = 0       # subsets of total_prompt_tokens (prompt caching)
     cache_write_tokens: int = 0
     agents_used: list[str] = []
-    synthesis_streaming = False
     # Output link allow-list (src/guardrails.py): one LinkGuard per LLM run, keyed by
     # run id because agents stream concurrently. Web-search result URLs join the
     # allow-list once the search agent finishes (before synthesis starts).
@@ -178,15 +179,30 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
             if etype == "on_chain_start" and ename in _AGENT_NODES:
                 current_agent = ename
                 agent_start_times[ename] = now
-                if ename not in ("supervisor_route",):
+                if ename not in _PRE_NODES:
                     agents_used.append(ename)
-                synthesis_streaming = (ename == "synthesise")
                 yield _sse("agent_start", {"agent": ename})
 
             elif etype == "on_chain_end" and ename in _AGENT_NODES:
                 latency = now - agent_start_times.get(ename, now)
                 output  = data.get("output", {}) or {}
                 payload: dict = {"agent": ename, "latency_ms": latency}
+
+                if ename == "understand" and output.get("question") and output["question"] != question:
+                    yield _sse("rewrite", {"standalone": output["question"]})
+
+                if ename == "kb_lookup":
+                    kb = output.get("kb") or {}
+                    yield _sse("kb_lookup", {
+                        "relevant":       kb.get("relevant", False),
+                        "by":             kb.get("by", "score"),
+                        "relevant_count": len(kb.get("chunks", [])),
+                        "best_score":     kb.get("best_score", 0.0),
+                        "low":            kb.get("low"), "high": kb.get("high"),
+                        "chunks":         [{k: c[k] for k in ("source", "similarity", "text")}
+                                           for c in kb.get("chunks", [])[:5]],
+                        "latency_ms":     kb.get("latency_ms", latency),
+                    })
 
                 if ename == "supervisor_route":
                     routing = output.get("routing", "tmdb")
@@ -235,9 +251,12 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
 
             # ── LLM lifecycle (LangChain 1.2+ emits on_chat_model_* for BaseChatModel) ─
 
+            # Which node made this LLM call: LangGraph tags every event with it. (Agents run
+            # in parallel, so "the last node that started" would misattribute tokens.)
             elif etype == "on_chat_model_start":
+                node = (event.get("metadata") or {}).get("langgraph_node") or current_agent
                 yield _sse("llm_start", {
-                    "agent": current_agent,
+                    "agent": node,
                     "model": event.get("name", "claude"),
                 })
 
@@ -245,27 +264,31 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
                 chunk = data.get("chunk")
                 if chunk is None:
                     continue
+                node = (event.get("metadata") or {}).get("langgraph_node") or current_agent
+                final = node == "synthesise"
                 content = text_of(getattr(chunk, "content", None))
                 if content:
                     guard = link_guards.setdefault(event.get("run_id", ""), guardrails.LinkGuard(search_urls))
                     content = guard.feed(content)
                 if content:
-                    if synthesis_streaming:
+                    if final:
                         final_parts.append(content)
                     yield _sse("token", {
                         "content":  content,
-                        "agent":    current_agent,
-                        "is_final": synthesis_streaming,
+                        "agent":    node,
+                        "is_final": final,
                     })
 
             elif etype == "on_chat_model_end":
+                node = (event.get("metadata") or {}).get("langgraph_node") or current_agent
+                final = node == "synthesise"
                 guard = link_guards.pop(event.get("run_id", ""), None)
                 rest = guard.flush() if guard else ""
                 if rest:
-                    if synthesis_streaming:
+                    if final:
                         final_parts.append(rest)
-                    yield _sse("token", {"content": rest, "agent": current_agent, "is_final": synthesis_streaming})
-                if guard and guard.removed and synthesis_streaming:
+                    yield _sse("token", {"content": rest, "agent": node, "is_final": final})
+                if guard and guard.removed and final:
                     # Shown in the chat's step trace: the output guardrail acting, visibly.
                     yield _sse("guardrail", {"kind": "link_removed", "count": len(guard.removed),
                                              "domains": list(dict.fromkeys(map(_domain, guard.removed)))[:3]})
@@ -283,12 +306,15 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
                 total_prompt_tokens     += prompt_t
                 total_completion_tokens += compl_t
                 details = (um.get("input_token_details") if isinstance(um, dict) else None) or {}
-                cache_read_tokens  += details.get("cache_read", 0) or 0
-                cache_write_tokens += details.get("cache_creation", 0) or 0
+                c_read  = details.get("cache_read", 0) or 0
+                c_write = details.get("cache_creation", 0) or 0
+                cache_read_tokens  += c_read
+                cache_write_tokens += c_write
                 yield _sse("llm_end", {
-                    "agent":             current_agent,
+                    "agent":             node,
                     "prompt_tokens":     prompt_t,
                     "completion_tokens": compl_t,
+                    "cache_read_tokens": c_read,
                 })
 
     except Exception as exc:
@@ -660,8 +686,35 @@ async def get_routing_rules():
         SUPERVISOR_LLM_RULE_BULLETS,
     )
     from src.llm import model_id
+    from src.kb_gate import HIGH, LOW
     return {
         "model": model_id(),
+        # Steps that run on every question, before the supervisor routes it.
+        "pre_steps": [
+            {
+                "id": "understand",
+                "name": "Understand",
+                "icon": "💬",
+                "description": "Rewrites a follow-up as a standalone question (\"its score\" → \"the score of "
+                               "Inception\") so every source can search it. No LLM call on a first question.",
+                "source": "query rewrite",
+            },
+            {
+                "id": "kb",
+                "name": "Knowledge base first",
+                "icon": "📚",
+                "description": f"Searches the knowledge base before routing. Best match ≥ {HIGH}: relevant; "
+                               f"< {LOW}: nothing useful (both without an LLM call); in between, a small LLM "
+                               "grader decides. Thresholds calibrated on labelled questions.",
+                "source": "Milvus vector DB",
+            },
+        ],
+        "kb_gate": {
+            "low": LOW, "high": HIGH,
+            "adjustment": "After routing: if the knowledge base had useful passages, the RAG agent joins "
+                          "even if the route didn't name it; if it had nothing, the RAG agent is skipped "
+                          "(web search stands in if nothing else is left).",
+        },
         "agents": [
             {
                 "id": "tmdb",
@@ -674,7 +727,7 @@ async def get_routing_rules():
                 "id": "rag",
                 "name": "RAG Agent",
                 "icon": "📚",
-                "description": "Knowledge base search — film theory, director styles, history, deep analysis",
+                "description": "Answers from the knowledge-base passages judged useful (director/genre/decade guides, music pages, ~24k Roger Ebert reviews)",
                 "source": "Milvus vector DB",
             },
             {

@@ -109,12 +109,12 @@ try {
   const answerBlocks = await page.locator('.answer-content').count()
   answerBlocks === 1 ? pass('answer rendered once') : fail('answer duplicated', `${answerBlocks} blocks`)
   const steps = await page.locator('.history-turn .step-text').allInnerTexts()
-  const want = [/Routing →/, /Combined \d+ sources? into one answer/]
+  const want = [/Knowledge base:/, /Routing →/, /Combined .+ into the answer/]
   want.every(r => steps.some(t => r.test(t)))
     ? pass('steps kept in the history', steps.join(' | ').slice(0, 160))
     : fail('step trace', steps.join(' | ').slice(0, 160))
   const summary = await page.locator('.history-turn .step-toggle').innerText()
-  ;/\d+ sources? · [\d.]+s · [\d,]+ tokens · claude-/.test(summary)
+  ;/\d+ sources? · [\d.]+s · [\d,]+ in.* \/ [\d,]+ out tokens · claude-/.test(summary)
     ? pass('summary line with model', summary) : fail('summary line', summary)
   // 👍/👎 bar under the finished answer (not clicked: a vote would land in the real feedback log)
   const fbVisible = await page.locator('.fb-bar .fb-btn').first().isVisible().catch(() => false)
@@ -125,6 +125,8 @@ await page.screenshot({ path: SHOT('2-search-result') })
 // ── 4b. Follow-up in the same conversation (costs 1 more search) ─────────────
 console.log('\n[4b] Follow-up question (chat memory)')
 try {
+  const docked = await page.locator('.query-section--docked').count()
+  docked === 1 ? pass('composer docked under the conversation') : fail('composer', 'not docked')
   await page.fill('.query-input', 'Who composed its score?')
   await page.click('.query-btn')
   await page.waitForFunction(() => document.querySelectorAll('.history-turn').length === 2, null, { timeout: 120000 })

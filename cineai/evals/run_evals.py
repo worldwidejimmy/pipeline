@@ -482,7 +482,7 @@ def _planted(plant: dict | None):
         yield
         return
     from src.tools import musicbrainz_client, tmdb_client
-    import src.agents.rag_agent as rag_agent
+    import src.agents.kb_lookup as kb_lookup
     import src.agents.search_agent as search_agent
     text, restore = plant["text"], []
 
@@ -516,11 +516,17 @@ def _planted(plant: dict | None):
         def w(real):
             async def fake(*a, **k):
                 r = await real(*a, **k)
-                r["chunks"] = [{"text": text, "score": 1.0, "source": "docs/directors/guide.md"}, *r["chunks"]]
+                # Retrieval happens in kb_lookup (knowledge base first). The poisoned passage is
+                # made the best match (similarity 0.9, above the gate's HIGH), the worst case:
+                # it passes the relevance gate without the grader, so this tests the defences
+                # after retrieval (spotlighting, the link allow-list), not the gate.
+                r["chunks"] = [{"text": text, "score": 1.0, "similarity": 0.9,
+                                "source": "docs/directors/guide.md"}, *r["chunks"]]
                 r["context"] = f"[Source: docs/directors/guide.md]\n{text}\n\n---\n\n{r['context']}"
+                r["dense_max"] = max(r.get("dense_max", 0.0), 0.9)
                 return r
             return fake
-        patch(rag_agent, "retrieve", w)
+        patch(kb_lookup, "retrieve", w)
     elif plant["tool"] == "web":
         def w(real):
             async def fake(*a, **k):

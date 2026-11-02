@@ -37,7 +37,7 @@ from pydantic import Field
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from src import usage
+from src import kb_gate, usage
 from src.tools import milvus_retriever, musicbrainz_client, tmdb_client
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -181,7 +181,7 @@ public = MCPServer(
 
 def _kb_item(c: dict) -> dict:
     src = c.get("source", "")
-    item = {"source": src, "score": round(c.get("score", 0.0), 4), "excerpt": clean(c.get("text"), 900)}
+    item = {"source": src, "similarity": round(c.get("similarity", 0.0), 3), "excerpt": clean(c.get("text"), 900)}
     if src.startswith("ebert/"):
         item["kind"] = "ebert-review-excerpt"
         item["url"] = f"https://www.rogerebert.com/reviews/{src.split('/', 1)[1]}"
@@ -194,7 +194,10 @@ def _kb_item(c: dict) -> dict:
     title="Search the movie knowledge base",
     description=("Hybrid (BM25 + dense, RRF-fused) search over a curated movie/TV/music knowledge base: "
                  "director and genre guides, decade overviews, and Roger Ebert review excerpts. Returns "
-                 "ranked excerpts with their source. " + THIRD_PARTY_NOTE),
+                 "ranked excerpts with their source and cosine similarity, plus a calibrated verdict: "
+                 "`relevant` is \"yes\" (best similarity >= 0.60), \"no\" (< 0.45) or \"unsure\" (judge the "
+                 "excerpts yourself). Search always returns its nearest excerpts, so check the verdict "
+                 "before relying on them. " + THIRD_PARTY_NOTE),
     annotations=ToolAnnotations(title="Search knowledge base", open_world_hint=False, **READ_ONLY),
 )
 @_audited("search_knowledge_base")
@@ -203,7 +206,11 @@ async def search_knowledge_base(
     top_k: int = Field(default=5, ge=1, le=8, description="How many excerpts to return"),
 ) -> dict:
     res = await milvus_retriever.retrieve(query, top_k=top_k)
-    return {"results": [_kb_item(c) for c in res["chunks"]], "search_type": res["search_type"]}
+    # The same calibrated gate as the web app's knowledge-base-first step, thresholds only
+    # (no LLM grader here: the caller's own model can judge the "unsure" band for free).
+    verdict = {"relevant": "yes", "none": "no", "grade": "unsure"}[kb_gate.decide(res["dense_max"])]
+    return {"relevant": verdict, "best_similarity": res["dense_max"],
+            "results": [_kb_item(c) for c in res["chunks"]], "search_type": res["search_type"]}
 
 
 def _title_item(m: dict) -> dict:

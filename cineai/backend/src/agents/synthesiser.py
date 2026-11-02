@@ -15,8 +15,16 @@ _SYSTEM = """You are a senior film and TV expert synthesising information from m
 Combine the agent outputs below into a single, well-structured answer for the user.
 
 Instructions:
+- Organise the answer around the user's question, NOT around the sources. Never write one
+  section per source ("From TMDB", "From the knowledge base"). Weave the facts together:
+  a film listed by two sources appears once, with what each source adds.
+- For a list of titles, produce ONE combined list: each title once, carrying every source's
+  details for it (e.g. "**The Shining** (1980): 8.2 on TMDB, 8.4 on IMDb per the horror guide").
+  Do not keep a second list for another source.
+- Credit sources inline where it matters, e.g. "rated 8.4 on TMDB; Roger Ebert gave it four stars".
 - Merge complementary information; do not repeat the same facts
-- Resolve any contradictions by noting the discrepancy
+- When sources disagree or measure different things (e.g. TMDB vs IMDb ratings), say so briefly
+  at that point in the answer
 - Maintain a consistent, engaging tone
 - Use markdown: **bold** for film/show titles, bullet points for lists, headers for sections
 - If only one agent ran, clean up and present that output directly
@@ -48,7 +56,8 @@ def _get_llm():
 
 async def synthesise_node(state: dict) -> dict:
     """LangGraph node: merge all agent results → final answer, update history."""
-    question = state["question"]
+    question = state.get("user_question") or state["question"]   # the user's own words
+    standalone = state["question"]                                # what the agents searched for
     history  = state.get("history") or []
 
     sections: list[str] = []
@@ -74,7 +83,8 @@ async def synthesise_node(state: dict) -> dict:
         # Agent reports are model-written but built from third-party data, so they are
         # spotlighted too: a second chance to drop anything injected upstream.
         system_blocks(_SYSTEM_STATIC, f"{history_note}\nAgent Outputs:\n" + wrap_untrusted("agent_reports", combined)),
-        HumanMessage(content=f"Question: {question}"),
+        HumanMessage(content=f"Question: {question}" + (
+            f"\n(Understood in context as: {standalone})" if standalone != question else "")),
     ])
 
     answer = text_of(response.content)

@@ -10,7 +10,7 @@ interface Props {
 }
 
 const ALL_NODES: AgentName[] = [
-  'supervisor_route', 'tmdb_agent', 'rag_agent', 'search_agent', 'music_agent', 'synthesise',
+  'understand', 'kb_lookup', 'supervisor_route', 'tmdb_agent', 'rag_agent', 'search_agent', 'music_agent', 'synthesise',
 ]
 
 // Mirrors backend/src/graph/pipeline.py:_dispatch — keep in sync.
@@ -51,8 +51,10 @@ export function PipelineGraph({ events }: Props) {
   const renderNode = (name: AgentName) => {
     const meta = AGENT_META[name]
     const state = nodeStates[name]
-    const dimmed = name !== 'supervisor_route' && name !== 'synthesise'
-      && routing !== null && !activeWorkers.includes(name)
+    // Dim agents the run didn't use (the knowledge-base gate can add or drop the RAG agent
+    // after routing, so "started" wins over the router's list).
+    const dimmed = !['understand', 'kb_lookup', 'supervisor_route', 'synthesise'].includes(name)
+      && routing !== null && state.status === 'idle' && !activeWorkers.includes(name)
 
     return (
       <div
@@ -86,6 +88,10 @@ export function PipelineGraph({ events }: Props) {
         <div className="pipeline-idle-hint">Ask a question to watch agents work in real-time</div>
       )}
       <div className="graph-nodes">
+        {renderNode('understand')}
+        <div className="graph-connector">↓</div>
+        {renderNode('kb_lookup')}
+        <div className="graph-connector">↓</div>
         {renderNode('supervisor_route')}
 
         <div className="graph-connector">↓</div>

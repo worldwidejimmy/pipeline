@@ -32,7 +32,9 @@ async def rag_agent_node(state: dict) -> dict:
     """LangGraph node: embed query → retrieve chunks → generate grounded answer."""
     question = state["question"]
 
-    retrieval = await retrieve(question)
+    # Knowledge-base-first: reuse the passages kb_lookup already found and judged useful.
+    kb = state.get("kb")
+    retrieval = {"context": kb["context"], "chunks": kb["chunks"]} if kb else await retrieve(question)
     context = retrieval["context"]
 
     if not context.strip():

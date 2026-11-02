@@ -1,0 +1,34 @@
+{"id": "pos-ebert-jaws", "q": "what did Roger Ebert think of Jaws", "label": "relevant", "expect_sources": ["ebert/jaws-1975"]}
+{"id": "pos-shawshank-worth", "q": "is The Shawshank Redemption worth watching", "label": "relevant", "expect_sources": ["ebert/great-movie-the-shawshank-redemption-1994"]}
+{"id": "pos-mulholland-ending", "q": "explain the ending of Mulholland Drive", "label": "relevant", "expect_sources": ["ebert/mulholland-drive-2001", "docs/directors/david-lynch.md"]}
+{"id": "pos-parasite-critics", "q": "what did critics say about Parasite", "label": "relevant", "expect_sources": ["ebert/parasite-movie-review-2019"], "holdout": true}
+{"id": "pos-casablanca-classic", "q": "why is Casablanca considered a classic", "label": "relevant", "expect_sources": ["ebert/great-movie-casablanca-1942", "ebert/casablanca-1942"]}
+{"id": "pos-barbie-review", "q": "was the Barbie movie any good", "label": "relevant", "expect_sources": ["ebert/barbie-movie-review-2023"], "holdout": true}
+{"id": "pos-bone-temple-2026", "q": "is 28 Years Later: The Bone Temple worth seeing", "label": "relevant", "expect_sources": ["ebert/28-years-later-the-bone-temple"], "note": "2026 review: newer than the model's training data"}
+{"id": "pos-private-life-2026", "q": "review of A Private Life with Jodie Foster", "label": "relevant", "expect_sources": ["ebert/a-private-life-jodie-foster"], "holdout": true, "note": "2026 review"}
+{"id": "pos-taylor-swift", "q": "Taylor Swift's career from country to pop", "label": "relevant", "expect_sources": ["docs/music/artists/taylor-swift.md"]}
+{"id": "pos-heist-recs", "q": "recommend a clever heist film", "label": "relevant", "expect_sources": ["docs/heist/bank-heist-films-guide.md"], "holdout": true}
+{"id": "neg-weather", "q": "what's the weather in Denver tomorrow", "label": "none"}
+{"id": "neg-lasagna", "q": "how do I make lasagna", "label": "none"}
+{"id": "neg-bitcoin", "q": "what is the price of bitcoin today", "label": "none", "holdout": true}
+{"id": "neg-world-cup", "q": "who won the 2026 World Cup final", "label": "none"}
+{"id": "neg-nba", "q": "NBA scores from last night", "label": "none"}
+{"id": "neg-router", "q": "how do I reset my wifi router", "label": "none", "holdout": true}
+{"id": "neg-translate", "q": "translate good morning into French", "label": "none"}
+{"id": "neg-math", "q": "what is 17 times 23", "label": "none"}
+{"id": "neg-hello", "q": "hi there, how are you?", "label": "none", "holdout": true}
+{"id": "neg-box-office", "q": "what were the box office numbers this weekend", "label": "none"}
+{"id": "neg-showtimes", "q": "movie showtimes near me tonight", "label": "none"}
+{"id": "neg-secret-wars-date", "q": "when does Avengers: Secret Wars come out", "label": "none", "holdout": true, "note": "unreleased: no review can exist"}
+{"id": "neg-streaming-where", "q": "which streaming service has Oppenheimer right now", "label": "none"}
+{"id": "neg-height", "q": "how tall is Ben Affleck", "label": "none"}
+{"id": "neg-net-worth", "q": "what is Tom Cruise's net worth", "label": "none", "holdout": true}
+{"id": "neg-dating", "q": "who is Zendaya dating", "label": "none"}
+{"id": "neg-episodes", "q": "how many episodes are in season 2 of The Bear", "label": "none"}
+{"id": "neg-oscars-airtime", "q": "what time do the Oscars air next year", "label": "none", "holdout": true}
+{"id": "neg-tour-dates", "q": "Taylor Swift tour dates next year", "label": "none", "note": "artist is in the KB, tour logistics are not"}
+{"id": "neg-tickets", "q": "how much are IMAX tickets", "label": "none"}
+{"id": "neg-netflix-price", "q": "how much does a Netflix subscription cost", "label": "none", "holdout": true}
+{"id": "neg-casting-news", "q": "who was just cast as the next James Bond", "label": "none"}
+{"id": "neg-trailer-today", "q": "which movie trailers dropped today", "label": "none"}
+{"id": "neg-birthday", "q": "which actors have a birthday today", "label": "none", "holdout": true}

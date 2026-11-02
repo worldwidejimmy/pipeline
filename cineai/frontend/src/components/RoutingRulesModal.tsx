@@ -22,6 +22,8 @@ interface KeywordOverrides {
 
 interface RulesData {
   model: string
+  pre_steps?: Agent[]
+  kb_gate?: { low: number; high: number; adjustment: string }
   agents: Agent[]
   routing_decisions: RoutingDecision[]
   keyword_overrides: KeywordOverrides
@@ -93,8 +95,23 @@ export function RoutingRulesModal({ onClose }: Props) {
               {tab === 'agents' && (
                 <div>
                   <p className="rules-intro">
-                    Each query is dispatched to one or more agents in parallel.
-                    Results are merged by the synthesiser into a single answer.
+                    Every question first goes through these steps. The chat shows each one as it runs.
+                  </p>
+                  <div className="rules-agent-grid" style={{ marginBottom: 18 }}>
+                    {(data.pre_steps ?? []).map(a => (
+                      <div key={a.id} className="rules-agent-card">
+                        <div className="rules-agent-header">
+                          <span className="rules-agent-icon">{a.icon}</span>
+                          <span className="rules-agent-name">{a.name}</span>
+                          <span className="rules-agent-source">{a.source}</span>
+                        </div>
+                        <div className="rules-agent-desc">{a.description}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="rules-intro">
+                    Then the supervisor routes it to one or more of these agents, which run in parallel.
+                    The synthesiser merges their reports into a single answer.
                   </p>
                   <div className="rules-agent-grid">
                     {data.agents.map(a => (
@@ -118,6 +135,13 @@ export function RoutingRulesModal({ onClose }: Props) {
                     The supervisor outputs exactly one of these routing decisions per query.
                     Multi-agent routes run all named agents in parallel.
                   </p>
+                  {data.kb_gate && (
+                    <p className="rules-intro">
+                      <strong>Knowledge base first.</strong> {data.kb_gate.adjustment} The chat shows the
+                      decision chip (e.g. <code className="rules-route-key step-chip-route">tmdb+rag</code>)
+                      and any adjustment on its routing step.
+                    </p>
+                  )}
                   <div className="rules-route-list">
                     {data.routing_decisions.map(r => (
                       <div key={r.key} className="rules-route-row">

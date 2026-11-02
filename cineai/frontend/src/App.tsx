@@ -34,7 +34,7 @@ interface Turn {
 }
 
 // Events that describe a step (everything except the token stream).
-const STEP_EVENTS = ['pipeline_start', 'kb_lookup', 'agent_start', 'agent_end', 'routing_decision',
+const STEP_EVENTS = ['pipeline_start', 'rewrite', 'kb_lookup', 'agent_start', 'agent_end', 'routing_decision',
   'chunks_retrieved', 'tmdb_results', 'music_results', 'search_results', 'guardrail', 'llm_start', 'llm_end', 'done'] as const
 
 function loadPref(key: string, fallback: boolean): boolean {
@@ -94,6 +94,7 @@ export default function App() {
   }, [])
 
   const esRef        = useRef<EventSource | null>(null)
+  const inputRef     = useRef<HTMLInputElement>(null)
   const answerEndRef = useRef<HTMLDivElement>(null)
   const historyRef   = useRef<HTMLDivElement>(null)
 
@@ -216,6 +217,7 @@ export default function App() {
         setPendingQ('')
       }
       refreshUsage()
+      setTimeout(() => inputRef.current?.focus(), 0)   // ready for the next follow-up
     })
 
     es.onerror = () => {
@@ -229,6 +231,60 @@ export default function App() {
     e.preventDefault()
     run(query)
   }
+
+  const chatting = history.length > 0 || isStreaming || !!answer
+
+  // The question box: a hero at the top before the first question, docked at the bottom after.
+  const composer = (
+        <div className={`query-section ${chatting ? 'query-section--docked' : ''}`}>
+          <div className="query-label">
+            {chatting ? 'Ask a follow-up' : 'Ask about any movie, TV show, or music'}
+          </div>
+          <form className="query-form" onSubmit={handleSubmit}>
+            <div className="query-input-wrap">
+              <span className="query-input-icon">🔍</span>
+              <input
+                className="query-input"
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                placeholder={
+                  history.length > 0
+                    ? 'e.g. What about the director? Show me similar films…'
+                    : 'e.g. Best heist movies, or "Tell me about Inception"'
+                }
+                disabled={isStreaming}
+                autoFocus
+                ref={inputRef}
+              />
+            </div>
+            <button className="query-btn" type="submit" disabled={isStreaming || !query.trim()}>
+              {isStreaming ? '…' : 'Ask'}
+            </button>
+          </form>
+
+          {/* Honest about where a question goes (backend src/tracing.py redacts before upload). */}
+          <div className="privacy-note">
+            Questions are answered by Anthropic's Claude and logged for quality monitoring, with
+            emails, phone numbers and IP addresses redacted. Please don't include personal information.
+          </div>
+
+          {history.length === 0 && (
+            <div className="example-queries">
+              {EXAMPLE_QUERIES.map(({ icon, text }) => (
+                <button
+                  key={text}
+                  className="example-chip"
+                  onClick={() => { setQuery(text); run(text) }}
+                  disabled={isStreaming}
+                >
+                  <span>{icon}</span>
+                  {text}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+  )
 
   const showTrending = !answer && !isStreaming && history.length === 0
 
@@ -387,54 +443,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* Search hero */}
-        <div className="query-section">
-          <div className="query-label">
-            {history.length > 0 ? 'Follow-up question' : 'Ask about any movie, TV show, or music'}
-          </div>
-          <form className="query-form" onSubmit={handleSubmit}>
-            <div className="query-input-wrap">
-              <span className="query-input-icon">🔍</span>
-              <input
-                className="query-input"
-                value={query}
-                onChange={e => setQuery(e.target.value)}
-                placeholder={
-                  history.length > 0
-                    ? 'e.g. What about the director? Show me similar films…'
-                    : 'e.g. Best heist movies, or "Tell me about Inception"'
-                }
-                disabled={isStreaming}
-                autoFocus
-              />
-            </div>
-            <button className="query-btn" type="submit" disabled={isStreaming || !query.trim()}>
-              {isStreaming ? '…' : 'Ask'}
-            </button>
-          </form>
-
-          {/* Honest about where a question goes (backend src/tracing.py redacts before upload). */}
-          <div className="privacy-note">
-            Questions are answered by Anthropic's Claude and logged for quality monitoring, with
-            emails, phone numbers and IP addresses redacted. Please don't include personal information.
-          </div>
-
-          {history.length === 0 && (
-            <div className="example-queries">
-              {EXAMPLE_QUERIES.map(({ icon, text }) => (
-                <button
-                  key={text}
-                  className="example-chip"
-                  onClick={() => { setQuery(text); run(text) }}
-                  disabled={isStreaming}
-                >
-                  <span>{icon}</span>
-                  {text}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        {!chatting && composer}
 
         {/* Content area */}
         <div className="answer-section" ref={historyRef}>
@@ -533,6 +542,9 @@ export default function App() {
 
           <div ref={answerEndRef} />
         </div>
+
+        {/* In a conversation the composer docks under the latest answer, like any chat app. */}
+        {chatting && composer}
       </div>
 
       {/* ── Right panel: AI Pipeline (optional; ⚡ in the header) ─────────────── */}

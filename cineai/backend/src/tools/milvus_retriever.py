@@ -6,6 +6,7 @@ Falls back to dense-only search on collections with the old schema.
 """
 from __future__ import annotations
 
+import asyncio
 import time
 from functools import lru_cache
 from typing import Any
@@ -76,33 +77,51 @@ async def retrieve(query: str, top_k: int | None = None) -> dict[str, Any]:
             param={"metric_type": "BM25"},
             limit=k,
         )
-        raw = client.hybrid_search(
+        # Milvus calls are blocking I/O: off the event loop, so concurrent requests keep streaming.
+        raw = await asyncio.to_thread(
+            client.hybrid_search,
             collection_name=cfg.milvus_collection,
             reqs=[dense_req, sparse_req],
             ranker=RRFRanker(k=cfg.hybrid_rrf_k),
             limit=k,
-            output_fields=["text", "source"],
+            output_fields=["text", "source", "dense_vector"],
         )
         hits = raw[0]
     else:
         # Dense-only fallback for collections ingested before the hybrid migration
         search_type = "dense"
-        raw = client.search(
+        raw = await asyncio.to_thread(
+            client.search,
             collection_name=cfg.milvus_collection,
             data=[dense_vec],
             anns_field="dense_vector",
             param={"metric_type": "IP"},
             limit=k,
-            output_fields=["text", "source"],
+            output_fields=["text", "source", "dense_vector"],
         )
         hits = raw[0]
 
+    # Relevance signal for the knowledge-base gate (src/agents/kb_lookup.py). The fused
+    # RRF score depends only on rank, so it can't say whether anything is relevant; the
+    # dense similarity can. Vectors are unit length, so the inner product is the cosine.
+    # `dense_max` is the best similarity among the dense top-k, the exact signal the
+    # threshold was calibrated on (evals/experiments/kb_gate_experiment.py).
+    dense_top = await asyncio.to_thread(
+        client.search, cfg.milvus_collection, data=[dense_vec], anns_field="dense_vector",
+        search_params={"metric_type": "IP"}, limit=k, output_fields=["source"])
+    dense_max = max((h["distance"] for h in dense_top[0]), default=0.0)
+
     latency_ms = int((time.time() - t0) * 1000)
+
+    def _sim(hit: dict) -> float:
+        vec = hit["entity"].get("dense_vector")
+        return round(sum(a * b for a, b in zip(vec, dense_vec)), 4) if vec else 0.0
 
     chunks = [
         {
             "text": hit["entity"]["text"],
-            "score": float(hit["distance"]),
+            "score": float(hit["distance"]),          # fused rank score (ordering only)
+            "similarity": _sim(hit),                  # cosine to the query (meaningful)
             "source": hit["entity"].get("source", "unknown"),
             "search_type": search_type,
         }
@@ -119,4 +138,5 @@ async def retrieve(query: str, top_k: int | None = None) -> dict[str, Any]:
         "latency_ms": latency_ms,
         "top_k": k,
         "search_type": search_type,
+        "dense_max": round(float(dense_max), 4),
     }

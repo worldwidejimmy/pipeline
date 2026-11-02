@@ -7,7 +7,8 @@ export type AgentName =
   | 'search_agent'
   | 'music_agent'
   | 'synthesise'
-  | 'kb_lookup';      // knowledge-base-first retrieval, before routing
+  | 'understand'      // rewrites a follow-up as a standalone question
+  | 'kb_lookup';      // knowledge-base-first retrieval with a relevance gate
 
 // Must stay in sync with the _dispatch mapping in backend/src/graph/pipeline.py.
 export type RoutingDecision =
@@ -62,12 +63,14 @@ export interface LlmEndEvent {
   agent: AgentName;
   prompt_tokens: number;
   completion_tokens: number;
+  cache_read_tokens?: number;
   ts: number;
 }
 
 export interface RagChunk {
   text: string;
-  score: number;
+  score: number;              // fused rank score (ordering only)
+  similarity?: number;        // cosine similarity to the question
   source: string;
   /** 'hybrid' = BM25 + dense (Milvus 2.5); 'dense' = embedding-only fallback */
   search_type?: 'hybrid' | 'dense';
@@ -90,11 +93,19 @@ export interface TmdbResultsEvent {
 export interface KbLookupEvent {
   type: 'kb_lookup';
   relevant: boolean;          // passed the calibrated relevance gate
+  by: 'score' | 'grader';     // thresholds alone, or the LLM grader (unsure band)
   relevant_count: number;
-  best_score: number;         // dense similarity of the best passage
-  threshold: number;
-  chunks: RagChunk[];         // the relevant passages (empty when none)
+  best_score: number;         // dense (cosine) similarity of the best passage
+  low: number;                // below: clearly unrelated
+  high: number;               // at/above: clearly relevant
+  chunks: { source: string; similarity: number; text: string }[];   // the useful passages
   latency_ms: number;
+  ts: number;
+}
+
+export interface RewriteEvent {
+  type: 'rewrite';
+  standalone: string;         // the follow-up rewritten as a self-contained question
   ts: number;
 }
 
@@ -128,6 +139,8 @@ export interface DoneEvent {
   total_completion_tokens: number;
   agents_used: AgentName[];
   model?: string;
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
   ts: number;
 }
 
@@ -148,6 +161,7 @@ export type PipelineEvent =
   | ChunksRetrievedEvent
   | TmdbResultsEvent
   | KbLookupEvent
+  | RewriteEvent
   | SearchResultsEvent
   | MusicResultsEvent
   | GuardrailEvent
@@ -211,5 +225,6 @@ export const AGENT_META: Record<AgentName, { label: string; color: string; icon:
   search_agent:     { label: 'Web Search',   color: '#f97316', icon: '🌐' },
   music_agent:      { label: 'Music Agent',  color: '#ec4899', icon: '🎵' },
   synthesise:       { label: 'Synthesiser',  color: '#eab308', icon: '✨' },
+  understand:       { label: 'Understand',   color: '#94a3b8', icon: '💬' },
   kb_lookup:        { label: 'KB lookup',    color: '#60a5fa', icon: '📚' },
 };

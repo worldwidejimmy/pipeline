@@ -2,6 +2,41 @@
 
 Measured ideas, kept with the code that measured them, **including the ones we didn't ship**.
 
+## Knowledge-base relevance gate: shipped (2026-11-02)
+
+**Question:** retrieval always returns its nearest passages. Can a cheap signal tell "the
+knowledge base has something useful for this question" from "it doesn't", so the chat can
+say so honestly, bring in the RAG agent when it helps and skip its LLM call when it can't?
+`kb_gate_experiment.py`; labelled set = the 34 T2 cases (answerable by construction) +
+`datasets/kb_gate.jsonl` (10 natural answerable questions, including two 2026 reviews newer
+than the model, and 24 unanswerable ones: off-topic, live logistics, celebrity trivia,
+unreleased films). Tuned on the non-holdout split, reported on the held-out split.
+
+**Why not the existing score:** the hybrid search's RRF score depends only on rank (1st place
+≈ 0.033 for a perfect match and for the least-bad of a bad lot).
+
+| Signal (free, no LLM) | answerable range | unanswerable range | best threshold (tuning) | held-out |
+|---|---|---|---|---|
+| dense cosine, best of top-6 | 0.454–0.823 (median 0.671) | 0.221–0.599 (median 0.436) | 0.60: precision 1.00, recall 0.81 | 0 false "relevant", recall 0.78 |
+| BM25 top score | 12.1–41.7 | 11.4–28.5 | 14.6: precision 0.76 | 4 false "relevant" |
+
+The dense score separates the extremes cleanly but overlaps between 0.45 and 0.60 (18 of 68
+questions: 9 answerable, 9 not, e.g. "was the Barbie movie any good" vs "Taylor Swift tour
+dates"). So the gate is three-way (`src/kb_gate.py`): ≥ 0.60 relevant, < 0.45 nothing useful,
+both with no LLM call; the band between goes to a Haiku grader (`src/agents/kb_lookup.py`)
+that also picks which passages to keep.
+
+**Grader on the band** (`GRADE=1`): 17/18 after tightening the prompt to "the passage must be
+about the specific title/person asked about". The miss: "who was just cast as the next James
+Bond" kept a *Layer Cake* review (Daniel Craig's pre-Bond film). One apparent false positive
+in live testing was right: for "who composed the score for Inception?" it kept a *Purge:
+Election Year* review whose text compares that film's score to Zimmer's *Inception*.
+
+**Caveats:** 68 labelled questions is small; the thresholds belong to `text-embedding-3-small`
+and this corpus, so re-run after changing either. Effect on cost: the RAG agent now joins
+whenever the knowledge base is relevant, so T5 moved from $0.0008 to about $0.0010–0.0011 per
+question (more of the answer grounded in the curated corpus and Ebert reviews).
+
 ## Cross-encoder reranker: not shipped (2026-10-30)
 
 **Question:** does reranking the hybrid retriever's candidates improve RAG?
