@@ -4,7 +4,7 @@
 **Project path:** `cineai/` (subdirectory of the pipeline repo)  
 **Live URL:** `https://smartmoviesearch.com`  
 **Target deploy:** OVH cloud VPS + Cloudflare in front  
-**Last updated by:** Claude — service status modal, security audit, supervisor routing fixes, rate-limit tracker
+**Last updated by:** Claude — follow-up rewriting, knowledge base first (calibrated relevance gate), chat UI with step trace, Evals & ops panel
 
 ---
 
@@ -42,9 +42,11 @@ pipeline/                          ← git root (worldwidejimmy/pipeline)
 │   │       ├── config.py          ← centralised env var config
 │   │       ├── main.py            ← FastAPI app + SSE streaming endpoint
 │   │       ├── agents/
+│   │       │   ├── understand.py  ← rewrites a follow-up into a standalone question
+│   │       │   ├── kb_lookup.py   ← knowledge base first: search + relevance gate (+ grader)
 │   │       │   ├── supervisor.py  ← routes queries to agents (history-aware)
 │   │       │   ├── tmdb_agent.py  ← intent extraction → TMDB API → answer
-│   │       │   ├── rag_agent.py   ← Milvus retrieval → grounded answer
+│   │       │   ├── rag_agent.py   ← kb_lookup's useful passages → grounded answer
 │   │       │   ├── search_agent.py← Tavily web search → grounded answer
 │   │       │   └── synthesiser.py ← merges agents, maintains history
 │   │       ├── tools/
@@ -61,6 +63,8 @@ pipeline/                          ← git root (worldwidejimmy/pipeline)
 │           ├── types.ts           ← all SSE event types + TMDB types
 │           ├── index.css          ← dark/light theme design system (CSS vars + data-theme)
 │           └── components/
+│               ├── StepTrace.tsx      ← per-answer step trace + one-line summary
+│               ├── OpsModal.tsx       ← 🧪 Evals & ops (evals, scheduled jobs, ingest)
 │               ├── PipelineGraph.tsx  ← animated node diagram
 │               ├── AgentTimeline.tsx  ← Gantt execution chart
 │               ├── EventLog.tsx       ← real-time typed event log
@@ -86,12 +90,19 @@ Browser (port 80/443 via Cloudflare)
     GET /api/history?thread_id=...       → conversation history
     GET /api/trending                    → TMDB trending
     GET /api/search?q=...               → TMDB quick search
+    GET /api/ops/overview               → public jobs + ingest history (Evals & ops)
          │
     LangGraph StateGraph (compiled with MemorySaver)
+         │
+    understand   ← rewrites a follow-up as a standalone question (no LLM on a first question)
+         │
+    kb_lookup    ← knowledge base first: Milvus search + relevance gate (Haiku grader if unsure)
          │
     ┌────┴─────────────────────────────────────┐
     │          supervisor_route               │  ← Claude (tier from DEFAULT_MODEL_TIER)
     │  routes: tmdb|rag|search|music|combos   │
+    │  + KB adjustment: relevant → add rag,   │
+    │    nothing useful → drop rag            │
     └──┬───────────┬───────────┬───────────┬──┘
        │           │           │           │ (parallel fan-out)
   tmdb_agent   rag_agent  search_agent  music_agent
@@ -109,9 +120,12 @@ Browser (port 80/443 via Cloudflare)
 ### LangGraph State (per conversation thread)
 ```python
 class CineState(TypedDict, total=False):
-    question: str         # current question
+    question: str         # the question the agents use (a follow-up's standalone rewrite)
+    user_question: str    # the user's own words (the answer and history use these)
+    kb:       dict        # kb_lookup: relevant?, by score|grader, best_score, useful passages
     history:  list[dict]  # [{q, a}, ...] last 10 turns — persisted by MemorySaver
     routing:  str         # supervisor decision
+    routing_by: str       # "keyword" or "model"
     tmdb_result:  str     # TMDB agent output
     rag_result:   str     # RAG agent output
     search_result: str    # web search output
@@ -121,18 +135,23 @@ class CineState(TypedDict, total=False):
 
 **No reducers.** `CineState` declares plain types, not `Annotated[...]` with merge
 functions. That is safe *only* because each parallel agent writes a different key
-(`tmdb_result`, `rag_result`, `search_result`, `music_result`) and `history` is
-written solely by `synthesise` after the fan-in. If two agents were ever made to
+(`tmdb_result`, `rag_result`, `search_result`, `music_result`), `question`/`user_question`
+and `kb` are written by `understand`/`kb_lookup` in their own supersteps before the fan-out,
+and `history` is written solely by `synthesise` after the fan-in. If two agents were ever made to
 write the same key in the same superstep, LangGraph would raise on the concurrent
 update — that is the point at which a reducer becomes mandatory.
 
 ### SSE Event Flow (what the frontend receives)
 ```
-pipeline_start → routing_decision → agent_start (×N) →
+pipeline_start → [rewrite] → kb_lookup → routing_decision → agent_start (×N) →
   llm_start → token (streaming, is_final=true for synthesise) → llm_end →
-  chunks_retrieved / tmdb_results →
-agent_end (×N) → done
+  chunks_retrieved / tmdb_results / music_results / search_results →
+agent_end (×N) → [guardrail] → done
 ```
+
+LLM events are attributed to their real LangGraph node via the `langgraph_node` metadata
+(parallel agents used to be misattributed). The frontend renders these as each answer's
+step trace (`StepTrace.tsx`).
 
 **Important — LangChain event API (1.2+):** `main.py` listens for `on_chat_model_*`
 events (`on_chat_model_start`, `on_chat_model_stream`, `on_chat_model_end`), NOT the
@@ -218,8 +237,8 @@ curl "http://localhost:8001/api/search?q=inception"
 curl -N "http://localhost:8001/api/query?q=show+me+good+heist+movies&thread_id=test1"
 ```
 
-Backend unit tests (free — no Docker, no API keys; covers `src/usage.py`: quotas,
-caps, blacklist, lockout):
+Backend unit tests (free — no Docker, no API keys; 190 tests: quotas/caps/blacklist,
+the KB gate, guardrails, MCP contract, ops data, eval harness and more):
 
 ```bash
 make test-unit         # auto-creates backend/.tests-venv (fastapi + pytest) on first run
@@ -230,12 +249,12 @@ There is also a Playwright browser test of the whole running stack (`tests/e2e.m
 ```bash
 make test-e2e          # installs playwright + chromium on first run
 E2E_LIVE=1 make test-e2e      # additionally checks https://smartmoviesearch.com through Cloudflare
-E2E_COMPARE=1 make test-e2e   # additionally runs compare mode (1 more search, ~3 LLM calls)
 ```
 
-It exercises the real UI end to end — homepage, trending, a full agent-pipeline search
-with SSE streaming (costs 1 free-quota search + real Claude tokens), usage accounting,
-modals, theme — and verifies the anti-bot guard rejects headless user agents. Note when
+It exercises the real UI end to end (30 checks) — homepage, trending, a full agent-pipeline
+search with SSE streaming (costs 2 free-quota searches + real Claude tokens: a question and a follow-up), the step trace,
+the folded summary line, the docked question box, a follow-up turn that must resolve "its",
+the optional pipeline panel, usage accounting, modals incl. Evals & ops, the footer, theme — and verifies the anti-bot guard rejects headless user agents. Note when
 writing new checks: the backend blocks `HeadlessChrome` UAs, so the suite spoofs a real
 browser UA for everything except the dedicated anti-bot test case.
 
@@ -324,12 +343,15 @@ make test-api    # run curl smoke tests against running backend
 
 - [x] Multi-agent LangGraph pipeline (supervisor → tmdb/rag/search → synthesise)
 - [x] SSE streaming — real-time typed events to frontend (**fixed for LangChain 1.2**)
-- [x] Multi-turn conversation — MemorySaver + thread_id, supervisor history-aware
+- [x] Multi-turn conversation — MemorySaver + thread_id, supervisor history-aware; **follow-ups rewritten** into standalone questions for the agents (`understand.py`)
+- [x] **Knowledge base first** — every question searches the KB before routing; calibrated relevance gate decides whether the RAG agent runs (`kb_lookup.py`, `kb_gate.py`)
+- [x] **Chat UI + step trace** — per-answer trace of rewrite, KB verdict, routing, sources, Claude calls and tokens; observability panel optional (⚡); compare toggle removed (endpoint kept)
+- [x] **🧪 Evals & ops modal** — eval tiers, scheduled jobs, ingest/embedding history (`GET /api/ops/overview`)
 - [x] TMDB agent — search, discover, trending, person lookup, movie details
 - [x] RAG agent — Milvus **hybrid search** (BM25 sparse + dense, RRF fusion)
 - [x] Web search agent — Tavily, graceful degradation if key missing
 - [x] Synthesiser — always calls LLM, streams tokens to frontend with `is_final: true`
-- [x] Frontend observability: Pipeline Graph, Timeline, Event Log, Context Panel
+- [x] Frontend observability: Pipeline Graph, Timeline, Event Log, Context Panel (behind the ⚡ button)
 - [x] Conversation history UI — shows previous turns, "New Search" button
 - [x] Movie knowledge corpus — heist, Nolan, Scorsese, sci-fi, horror
 - [x] Ingest script — `scripts/ingest.py docs/` (creates hybrid collection with BM25 function)
@@ -349,7 +371,8 @@ make test-api    # run curl smoke tests against running backend
 
 ### Hybrid Search Details (implemented)
 - Collection schema: `text` (VARCHAR, analyzer enabled) + `sparse_vector` (BM25 auto-generated by Milvus) + `dense_vector` (1536d, OpenAI) + `source`
-- Retrieval: `AnnSearchRequest` for both fields → `RRFRanker(k=60)` fusion
+- Retrieval: `AnnSearchRequest` for both fields → `RRFRanker(k=60)` fusion; Milvus calls run off the event loop (`asyncio.to_thread`)
+- Each passage also returns its cosine `similarity` to the query, plus `dense_max` (best dense similarity) for the KB gate — the RRF score depends only on rank, so it can't signal relevance
 - Auto-migration: running `make ingest` on an old dense-only collection drops and recreates it
 - Fallback: if collection has no `sparse_vector` field, retriever silently falls back to dense-only
 - Config: `HYBRID_RRF_K=60` in `.env` (higher = more recall, lower = sharper precision)
@@ -371,7 +394,8 @@ docker compose exec backend python scripts/ingest.py docs/ --reset
 - [x] ~~**Knowledge base modal.**~~ **Done.**
 - [x] ~~**Whitepaper HTML page.**~~ **Done.**
 - [ ] **Streaming tokens in Event Log** — tokens currently only go to answer panel. Add a "Token Stream" sub-view to Event Log tab.
-- [ ] **RAGAS evaluation** — no automated quality measurement. Add `scripts/eval.py` with 20 Q&A pairs covering heist/horror/director queries.
+- [ ] **"RAG value" eval** — replaces the removed compare toggle: measure (e.g. with the existing blind-judge compare code in `compare.py`) whether knowledge-base grounding improves answers, especially for reviews newer than the model's training data.
+- [ ] **RAG agent summary call** — test whether it's redundant (the combiner could read the passages directly).
 - [ ] **Redis semantic cache** — repeated queries hit the Anthropic API every time. `langchain.cache.RedisSemanticCache` with cosine threshold 0.95.
 - [ ] **Watchlist** — PostgreSQL-backed. User saves movies to a named list. Frontend `/watchlist` route.
 - [ ] **IMDb dataset ingest** — `datasets.imdbws.com` has free TSV files (title.basics, title.ratings, title.principals). Ingesting ratings for 10M+ titles would make RAG much richer.
@@ -405,6 +429,8 @@ docker compose exec backend python scripts/ingest.py docs/ --reset
 ```
 Turn 1: "Show me good bank heist movies"
 Turn 2: "What about the director of Heat?"      ← supervisor knows context = Michael Mann
+                                                  (understand.py rewrites each follow-up into a
+                                                   standalone question before the agents see it)
 Turn 3: "What are his other films like that?"   ← still knows Michael Mann
 Turn 4: "Which one should I watch first?"       ← can now recommend within Mann's filmography
 ```
@@ -554,6 +580,7 @@ The app is running live on the OVH VPS (behind Cloudflare — direct IP not list
 | `backend/src/main.py` | SSE streaming logic; **event names must use `on_chat_model_*`** for LangChain 1.2+ |
 | `backend/src/graph/pipeline.py` | Add new agent nodes, change routing logic |
 | `backend/src/agents/supervisor.py` | Change routing rules or add new routing targets |
+| `backend/src/kb_gate.py` | KB relevance thresholds — re-run `evals/experiments/kb_gate_experiment.py` after changing the embedding model or corpus |
 | `backend/src/tools/tmdb_client.py` | Add new TMDB endpoints (e.g., `/movie/{id}/reviews`) |
 | `frontend/src/types.ts` | Add new SSE event types |
 | `frontend/src/index.css` | Theme system — `:root` (dark) and `:root[data-theme="light"]` |
@@ -573,10 +600,10 @@ the 30/day cap. Every result records the model id.
 | T0 | parse/contract fixtures, judge-label swap, model-param mapping, the eval gates themselves | $0 | `make test-unit` |
 | T1 | 48 routing questions → expected route (+acceptable alternates, ~20% holdout) | <$0.01 | `make eval-t1` |
 | T2 | 34 retrieval cases (14 `holdout`, never tuned on → `holdout_mrr`): hit@k, MRR, **content coverage**. Known miss: `wes-anderson-look` | ~$0 | `make eval-t2` |
-| T4 | 6 full-pipeline canaries: must-contain facts, must-not-say "couldn't find" | ~$0.01 | `make eval-t4` |
+| T4 | 8 full-pipeline canaries: must-contain facts, must-not-say "couldn't find" | ~$0.01 | `make eval-t4` |
 | T5 | p50/p95 latency, tokens/query, $/query — from the T4 runs | $0 | (with T4) |
 | T6 | MCP interface: a real MCP client over HTTP checks the tool contract against `evals/fixtures/mcp_tools.json`, each tool on a known question, and that the Host/Origin guard refuses | ~$0 | `make eval-t6` |
-| T7 | red team: 11 attacks (3 direct, 8 planted into TMDB/MusicBrainz/web/KB results in-process; subtle ones ×2), graded on what the attack achieved | ~$0.015 | `make eval-t7` |
+| T7 | red team: 11 attacks (3 direct, 8 planted into TMDB/MusicBrainz/web/KB results in-process; subtle ones ×2), graded on what the attack achieved. KB passages are planted at `kb_lookup`'s retrieve and forced past the gate (worst case) | ~$0.015 | `make eval-t7` |
 | T3 | weekly LLM judge (newest Sonnet) on 14 live answers incl. 4 unanswerable, + 4 calibration answers that check the judge | ~$0.2 | `--tier t3` |
 
 - **Unattended:** `eval_nightly.sh`, cron **04:20 UTC** (before the 04:50 ops digest) —
@@ -595,8 +622,13 @@ the 30/day cap. Every result records the model id.
   `docker compose exec -T -e MODEL_PIN=claude-haiku-4-5-20251001 backend python3 /app/evals/run_evals.py --tier t4 --no-gate`
   (careful: this run's results also land in `latest.json`; re-run the nightly after).
 
+**Latest (2026-11-02, after knowledge base first):** t1 48/48, t2 33/34 (MRR 0.79), t4 8/8,
+t5 about $0.0010–0.0011 per question (up from $0.0008: the RAG agent joins whenever the KB is
+relevant, plus the rewrite/grader calls), t6 6/6, t7 14/14; e2e 30/30; 190 unit tests.
+
 Experiments, including the ones not shipped, live in `evals/experiments/` with their numbers
-(e.g. the cross-encoder reranker: held-out MRR +0.05, no recall gain, so not shipped).
+(e.g. the cross-encoder reranker: held-out MRR +0.05, no recall gain, so not shipped; the KB
+relevance gate: shipped, see below).
 
 Track record — bugs the evals caught that tests didn't:
 - T2 rejected the first chunking rewrite and validated the second (Police albums: 20% → 100% coverage).
@@ -630,6 +662,9 @@ MCP apps, everything else to FastAPI. The frontend nginx proxies those paths to 
 - **Changing a tool's name, description, schema or annotations** fails the unit tests and
   T6 until you regenerate the pinned contract: `cd backend && .tests-venv/bin/python -m
   tests.test_mcp_server --update`. Review that diff: it is exactly what every client sees.
+- **`search_knowledge_base`** returns `relevant` (`"yes"`/`"no"`/`"unsure"`, same thresholds as
+  the site's gate, no grader: the caller's model judges "unsure"), `best_similarity`, and a
+  per-result cosine `similarity` (not the rank score).
 - **Try it:** `claude mcp add --transport http smartmoviesearch https://smartmoviesearch.com/mcp`,
   or the MCP Inspector against the same URL.
 
@@ -717,3 +752,45 @@ fallback). `MODEL_PIN=<id>` overrides — use it if a new model regresses the ev
 recreate the backend. Request params (thinking off where allowed, no `temperature` on the
 new generation) come from the model's advertised capabilities. `/admin` shows the live
 model, why it was chosen, and whether a newer one exists.
+
+## Follow-ups and knowledge base first (2026-11-02)
+
+Graph: `understand → kb_lookup → supervisor_route → [tmdb|rag|search|music] → synthesise`.
+- **`understand`** (`src/agents/understand.py`): with history, one structured call
+  (`llm.extract`) rewrites a follow-up into a standalone question ("Who composed its score?" →
+  "Who composed the score for Inception (2010)?"). Agents get the rewrite in `question`; the
+  answer and history use `user_question`. No history → no LLM call. Fails open to the original.
+- **`kb_lookup`** (`src/agents/kb_lookup.py`, pure gate in `src/kb_gate.py`): every question
+  searches the KB before routing. Best dense cosine (`text-embedding-3-small`) ≥ 0.60 →
+  relevant, < 0.45 → nothing useful, no LLM either way; in between a Haiku grader decides and
+  picks the useful passages (fails closed). Calibrated on 68 labelled questions (34 T2 cases + 34
+  in `evals/datasets/kb_gate.jsonl`): 0 false "relevant" at 0.60 on tuning and held-out splits;
+  dense separated far better than BM25; grader 17/18 on the unsure band. Details:
+  `evals/experiments/README.md`. **Re-run `kb_gate_experiment.py` after changing the embedding
+  model or the corpus.**
+- **`apply_kb`** (in `_dispatch`): relevant → the RAG agent always joins and reuses
+  `kb_lookup`'s passages (no second search); nothing useful → the RAG agent is skipped, web search
+  as the fallback if nothing else is left.
+- **Synthesiser** merges by question, not by source (one combined list, sources credited inline,
+  disagreements noted at the point). **TMDB detail** crew lists key roles first, incl. Original
+  Music Composer.
+- **UI:** chat layout; each answer has a step trace (`StepTrace.tsx`); older turns fold to one
+  line (sources · seconds · tokens in (cached %) / out · model). The graph/timeline/events panel
+  is behind ⚡. The compare toggle is gone from the UI; `/api/compare` stays.
+
+## Evals & ops panel (2026-11-02)
+
+🧪 header button → `OpsModal.tsx`, tabs: Evals (each tier: what/how/when/latest), Scheduled jobs
+(cron times in UTC + local, what each does, whether it uses an LLM, last run), Ingest &
+embeddings (source → chunking → embedding → index → query time, plus nightly ingest history).
+- Data: **public** `GET /api/ops/overview` (`src/ops.py`), an explicit allow-list. Never add log
+  text, paths, hostnames, backup locations or issue details; those stay in emails and `/admin`.
+- `src/ops.py:JOBS` mirrors the crontab (the crontab is the source of truth; keep them in step).
+- `scripts/ingest_ebert.py` appends exact embedding tokens/cost per run to
+  `backend/data/ingest-history.jsonl` (gitignored); older runs are estimated at 135
+  tokens/passage (measured mean).
+- Chunking: reviews `RecursiveCharacterTextSplitter` 900/120 (paragraph → line → sentence);
+  guides header-aware — one passage per `##` section with its `###` subsections up to 3,200
+  chars, bigger sections split per `###`, sub-split above 1,600 chars (800/100), tiny (<200)
+  merged, heading path kept. Embedding `text-embedding-3-small`, 1536 dims, $0.02 per 1M tokens;
+  a query embed is ≈15 tokens; the Milvus search is local, no Claude call. Index ~122k passages.

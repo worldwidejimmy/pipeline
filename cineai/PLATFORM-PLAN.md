@@ -126,6 +126,10 @@ built from `latest.json` with an explicit allow-list of fields.
 - **Toggle default.** Keep the 🆚 switch and default it to **RAG (off)**. It already
   defaults to off, so make that explicit. If it's ever persisted, persist RAG.
 
+*Update 2026-11-02:* the compare toggle was **removed from the UI**. It always looked bad
+because Claude already knows famous films. `/api/compare` (and its blind judge) stays, to back
+a "RAG value" eval instead (Phase 2, Next).
+
 ---
 
 ## Build order (each step: code → tests/evals → docs → commit → push, privacy audit first)
@@ -170,3 +174,21 @@ Order, each shipped as code → tests/evals → docs → commit → push:
    input tokens on that call (the schema is injected), no accuracy gain (the text parser never
    failed in T1), and one route shifted. The duplicate JSON templates were trimmed from the
    extraction prompts (−165 tokens).
+9. ✅ **Follow-ups + knowledge base first** (2026-11-02): an `understand` node rewrites a follow-up
+   into a standalone question for the agents; `kb_lookup` searches the knowledge base before
+   routing, with a relevance gate calibrated on 68 labelled questions (dense cosine ≥ 0.60
+   relevant, < 0.45 nothing useful, a Haiku grader in between). The RAG agent joins when the KB is
+   relevant and is skipped when it isn't. T5 moved from $0.0008 to about $0.0010–0.0011 per
+   question. See `evals/experiments/README.md`.
+10. ✅ **Chat UI + step trace, Evals & ops panel** (2026-11-02): each answer shows how it was made
+   (rewrite, KB verdict, routing, sources, Claude calls and tokens, guardrail removals, model);
+   the pipeline panel is optional; a public, allow-listed `GET /api/ops/overview` feeds the
+   🧪 Evals & ops modal (eval tiers, scheduled jobs, ingest/embedding history with exact tokens
+   and cost).
+
+**Next**
+- **"RAG value" eval** to replace the removed compare toggle: measure (e.g. with the existing
+  blind-judge compare code) whether knowledge-base grounding improves answers, especially for
+  reviews newer than the model's training data.
+- **Is the RAG agent's summary call redundant?** Test letting the combiner read the passages
+  directly.

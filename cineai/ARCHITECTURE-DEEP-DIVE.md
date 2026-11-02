@@ -13,7 +13,9 @@
 
 > "SmartMovieSearch is a production agentic-RAG service that answers natural-language movie, TV and
 > music questions that a filter UI can't — 'good bank heist movies', 'did Ebert like Blade Runner'.
-> A LangGraph supervisor node classifies each question into one of ten routing decisions, then
+> A follow-up is first rewritten into a standalone question, and every question searches the
+> knowledge base before routing, behind a calibrated relevance gate. A LangGraph supervisor node
+> then classifies each question into one of ten routing decisions, and
 > conditionally fans out to up to four specialist agents in parallel: a TMDB agent over the live
 > movie API, a RAG agent doing hybrid BM25 + dense retrieval in Milvus over a corpus of curated
 > essays plus scraped Roger Ebert reviews, a MusicBrainz agent, and a Tavily web-search agent. A
@@ -50,8 +52,10 @@ flowchart TD
     GATE -->|allowed| LG
 
     subgraph LG ["LangGraph StateGraph — src/graph/pipeline.py"]
+        UND["understand<br/>follow-up → standalone question"] --> KBL["kb_lookup<br/>retrieve + relevance gate"]
+        KBL --> SUP
         SUP["supervisor_route<br/>keyword override → Claude (16 tok)"]
-        SUP -->|_dispatch returns list| TMDB[tmdb_agent]
+        SUP -->|"_dispatch returns list (+ apply_kb)"| TMDB[tmdb_agent]
         SUP --> RAG[rag_agent]
         SUP --> SRCH[search_agent]
         SUP --> MUS[music_agent]
@@ -62,8 +66,8 @@ flowchart TD
     end
 
     TMDB --> TAPI["TMDB REST<br/>httpx, timeout=10"]
-    RAG --> MV[("Milvus 2.5.9 standalone<br/>hybrid_search + RRFRanker")]
-    RAG --> EMB["OpenAI text-embedding-3-small<br/>1536-d"]
+    KBL --> MV[("Milvus 2.5.9 standalone<br/>hybrid_search + RRFRanker")]
+    KBL --> EMB["OpenAI text-embedding-3-small<br/>1536-d"]
     SRCH --> TAV[Tavily]
     MUS --> MB[MusicBrainz]
 
@@ -109,7 +113,19 @@ Query: **"Show me good bank heist movies"**, `thread_id=t-123`.
    `pipeline.get_state(config)`, and seeds `initial_state = {"question": ..., "history": [...]}`.
    Emits `pipeline_start`. Then iterates `pipeline.astream_events(initial_state, config, version="v2")`.
 
-4. **`supervisor_route`** (`agents/supervisor.py:96`). `_keyword_route()` runs first: if the question
+4. **`understand`** (`agents/understand.py`). With history, one structured call (`llm.extract`)
+   rewrites a follow-up into a standalone question ("Who composed its score?" → "Who composed the
+   score for Inception (2010)?"); on a first question it makes no LLM call. **State mutation:**
+   `{"user_question": <original>, "question": <standalone>}` — agents use `question`, the
+   synthesiser answers `user_question` with the history.
+
+   **`kb_lookup`** (`agents/kb_lookup.py`, gate in `kb_gate.py`). Knowledge base first: retrieves
+   (step 6's hybrid search) and gates on `dense_max`, the best dense cosine of the top passages:
+   ≥ 0.60 relevant, < 0.45 nothing useful (no LLM call either way); in between, a Haiku grader
+   picks the useful passages. **State mutation:** `{"kb": {relevant, by, best_score, chunks,
+   context, …}}`.
+
+   **`supervisor_route`** (`agents/supervisor.py:96`). `_keyword_route()` runs first: if the question
    contains any of `_FORCE_MUSIC_KEYWORDS` ("lyrics", "discography", "album", …) or
    `_FORCE_TMDB_KEYWORDS` ("box office", "rotten tomatoes", …) the LLM is skipped entirely. Here it
    doesn't match, so the last three history turns are formatted into the system prompt and a Claude
@@ -120,11 +136,16 @@ Query: **"Show me good bank heist movies"**, `thread_id=t-123`.
    dict to a *list* of node names; `"all"` → `["tmdb_agent", "rag_agent", "search_agent",
    "music_agent"]`. LangGraph's `add_conditional_edges` treats a returned list as parallel activation
    — all four run in the same superstep, concurrently on one event loop. Unknown routing falls back
-   to `["tmdb_agent"]`.
+   to `["tmdb_agent"]`. The list then passes through `kb_gate.apply_kb`: if the KB was relevant
+   `rag_agent` is added; if not it is removed (with `search_agent` as the fallback if nothing is
+   left).
 
-6. **`rag_agent`** (`agents/rag_agent.py:29`) → `tools/milvus_retriever.retrieve(question)`.
-   Embeds the query (`aembed_query`, 1536-d), checks `_has_hybrid_schema()`, then issues two
-   `AnnSearchRequest`s and fuses with `RRFRanker`. Returns `{rag_result, _rag_chunks}`.
+6. **`rag_agent`** (`agents/rag_agent.py`) reuses `kb_lookup`'s useful passages (no second
+   search; it only calls `retrieve` itself if no lookup ran). The retrieval in `kb_lookup` is
+   `tools/milvus_retriever.retrieve(question)`: embeds the query (`aembed_query`, 1536-d), checks
+   `_has_hybrid_schema()`, then issues two `AnnSearchRequest`s and fuses with `RRFRanker`, plus a
+   dense-only search for `dense_max`; each passage carries its cosine `similarity`. Returns
+   `{rag_result, _rag_chunks}`.
    **`tmdb_agent`** (`agents/tmdb_agent.py:103`) makes *two* LLM calls: intent extraction
    (`max_tokens=256`, JSON) then a grounded answer (`max_tokens=1024`, or 1500 for
    `title_and_person`), with the TMDB payload truncated to 6000/9000 chars.
@@ -135,7 +156,9 @@ Query: **"Show me good bank heist movies"**, `thread_id=t-123`.
 7. **Superstep join.** Every agent node has an unconditional edge to `synthesise`
    (`pipeline.py:99-100`), so LangGraph waits for all active branches before running it.
    **`synthesise`** (`agents/synthesiser.py:46`) assembles `### TMDB Agent` / `### Music Agent` /
-   `### RAG Knowledge Base` / `### Web Search` sections and makes one streaming Claude call
+   `### RAG Knowledge Base` / `### Web Search` sections and makes one streaming Claude call,
+   instructed to merge **by question, not by source** (one combined list, sources credited
+   inline, disagreements noted at the point)
    (`temperature=0.2, max_tokens=1200`). **State mutation:** `{"answer": ..., "history": history + [{q, a}]}`
    truncated to the last 10 turns.
 
@@ -143,7 +166,9 @@ Query: **"Show me good bank heist movies"**, `thread_id=t-123`.
    - `on_chain_start` / `on_chain_end` where `name ∈ _AGENT_NODES` → `agent_start` / `agent_end`
      (+ `routing_decision`, `chunks_retrieved`, `tmdb_results`, `music_results`).
    - `on_chat_model_start` / `on_chat_model_stream` / `on_chat_model_end` → `llm_start` / `token` /
-     `llm_end`. **This is a load-bearing detail:** LangChain ≥1.0 emits `on_chat_model_*` for
+     `llm_end`, attributed to the node in the event's `langgraph_node` metadata. Also emitted:
+     `rewrite`, `kb_lookup`, `search_results`, `guardrail` (LinkGuard removals); the frontend
+     renders them as each answer's step trace (`StepTrace.tsx`). **This is a load-bearing detail:** LangChain ≥1.0 emits `on_chat_model_*` for
      `BaseChatModel`; the legacy `on_llm_*` names only fire for text-completion `BaseLLM`. Listening
      for the wrong family silently kills streaming.
    - Token accounting reads `usage_metadata` as a **dict**, not via `getattr` — `usage_metadata` is
@@ -167,11 +192,13 @@ Query: **"Show me good bank heist movies"**, `thread_id=t-123`.
 
 ### Why supervisor-router, not ReAct or a tool-calling loop
 
-The graph is a **two-hop DAG with no cycles**: `START → supervisor_route → {1..4 agents in
-parallel} → synthesise → END` (`pipeline.py:86-102`). Deliberate consequences:
+The graph is a **DAG with no cycles**: `START → understand → kb_lookup → supervisor_route →
+{1..4 agents in parallel} → synthesise → END` (`pipeline.py`). Deliberate consequences:
 
-- **Bounded cost and latency.** Worst case (`all`) is exactly 8 LLM calls: supervisor 1, tmdb 2,
-  music 2, rag 1, search 1, synthesise 1. A ReAct loop has no such bound — on an open, unauthenticated
+- **Bounded cost and latency.** Worst case (`all`) is 10 LLM calls: supervisor 1, tmdb 2,
+  music 2, rag 1, search 1, synthesise 1, plus the rewrite (follow-ups only) and the KB grader
+  (unsure band only). A relevant/nothing-useful verdict by score costs no LLM call, and "nothing
+  useful" removes the RAG agent's call. A ReAct loop has no such bound — on an open, unauthenticated
   endpoint that's a financial-DoS vector, not just a latency concern.
 - **Parallelism is free.** Four independent I/O-bound agents run in one superstep. A tool-calling
   loop is inherently sequential per step.
@@ -195,14 +222,19 @@ parallel} → synthesise → END` (`pipeline.py:86-102`). Deliberate consequence
    otherwise regex-extract `[a-z]+(\+[a-z]+)?` tokens, prefer the **longest** match (so `tmdb+rag`
    beats its own `tmdb` prefix), and fall back to `"tmdb+rag"`.
 4. **`_dispatch`'s own fallback** to `["tmdb_agent"]` for anything unmapped.
+5. **Knowledge-base adjustment** (`kb_gate.apply_kb`) — runs last: relevant → `rag_agent` joins;
+   nothing useful → `rag_agent` dropped, `search_agent` if nothing else is left.
 
 ### State schema and reducers — and why there aren't any
 
 ```python
-class CineState(TypedDict, total=False):        # pipeline.py:36
-    question: str
+class CineState(TypedDict, total=False):        # pipeline.py
+    question: str              # standalone rewrite of a follow-up (what the agents use)
+    user_question: str         # the user's own words (answer + history)
+    kb: dict                   # kb_lookup verdict + useful passages
     history: list[dict]        # [{"q": ..., "a": ...}] — last 10 turns
     routing: str
+    routing_by: str            # "keyword" or "model"
     tmdb_result: str
     rag_result: str
     search_result: str
@@ -213,8 +245,9 @@ class CineState(TypedDict, total=False):        # pipeline.py:36
 There are **no `Annotated[..., reducer]` channels.** This is safe *by construction*, and it's worth
 being able to say why: LangGraph raises `InvalidUpdateError` when two nodes in the same superstep
 write the same channel without a reducer. Here each parallel agent writes a **disjoint** key
-(`tmdb_result`, `rag_result`, `search_result`, `music_result`), and `history` is written only by
-`synthesise`, which runs alone in a later superstep. Adding a fifth agent that also wrote
+(`tmdb_result`, `rag_result`, `search_result`, `music_result`), `question`/`user_question`/`kb`
+are written by `understand`/`kb_lookup` in their own earlier supersteps, and `history` is written
+only by `synthesise`, which runs alone in a later superstep. Adding a fifth agent that also wrote
 `rag_result`, or making two nodes append to `history`, would immediately require
 `Annotated[list, operator.add]`.
 
@@ -238,7 +271,10 @@ synthesiser, but unbounded in *number of threads*). `DELETE /api/history` works 
 
 | Failure | Behaviour | Where |
 |---|---|---|
-| Milvus returns nothing | `rag_agent` short-circuits — **no LLM call** — and returns "The knowledge base does not contain relevant information for this query." | `rag_agent.py:36` |
+| KB gate says nothing useful | `rag_agent` is removed from the fan-out — **no LLM call** (`search_agent` added if nothing else is left) | `kb_gate.py:apply_kb` |
+| KB grader call fails | Fails closed: treated as not relevant | `kb_lookup.py:_grade` |
+| Follow-up rewrite fails / implausible | Fails open: the original question is used | `understand.py` |
+| Milvus returns nothing | `rag_agent` short-circuits — **no LLM call** — and returns "The knowledge base does not contain relevant information for this query." | `rag_agent.py` |
 | TMDB search empty | Hard stop, no LLM call, explicit "couldn't find '<query>'" string | `tmdb_agent.py:211` |
 | TMDB discover empty | Same pattern | `tmdb_agent.py:150` |
 | MusicBrainz artist not found | Same pattern | `music_agent.py:97` |
@@ -252,7 +288,7 @@ anti-hallucination control, reinforced by the synthesiser's CRITICAL instruction
 from memory when an agent reports "couldn't find". **There are no retries anywhere** — not on
 Anthropic calls, not on TMDB, not on Milvus. A single 429 or transient 500 ends the request.
 
-**Loop/recursion limits:** none configured. The graph is acyclic and at most 3 supersteps deep, so
+**Loop/recursion limits:** none configured. The graph is acyclic and at most 5 supersteps deep, so
 LangGraph's default `recursion_limit` (25) is never approached. Correct answer in an interview:
 "recursion limit is not a live concern in this topology; it would become one the moment I added a
 re-retrieval or critique edge."
@@ -286,8 +322,13 @@ re-ingest and after each nightly Ebert run) — read the live number with
 
 | Corpus | chunk_size | overlap | Where |
 |---|---|---|---|
-| Markdown docs | 800 | 100 | `ingest.py:46-47` |
+| Markdown guides | header-aware (see below); 800 / 100 for sub-splits | | `ingest.py` |
 | Ebert reviews | 900 | 120 | `ingest_ebert.py:31-32` |
+
+Guides are split **header-aware**: one passage per `##` section with its `###` subsections, up to
+3,200 chars; bigger sections split per `###`; those are sub-split above 1,600 chars (800/100);
+tiny sections (<200 chars) are merged; the heading path is kept in each passage. The index holds
+~122k passages.
 
 Reviews get a synthesised header before splitting so the first chunk carries provenance:
 `"Roger Ebert Review: {title} ({year})\nRating: {stars}/4 stars\nSource: rogerebert.com"`
@@ -296,8 +337,10 @@ Reviews get a synthesised header before splitting so the first chunk carries pro
 ### Embeddings
 
 OpenAI **`text-embedding-3-small`**, 1536-d (`config.py:35`, `milvus_retriever.py:22`).
-Chosen for cost (~$0.02/1M tokens) — embedding tens of thousands of reviews is the only
-non-trivial embedding bill in the system. OpenAI is the **only** embedding backend implemented:
+Chosen for cost ($0.02/1M tokens) — embedding tens of thousands of reviews is the only
+non-trivial embedding bill in the system (a query embed is ≈15 tokens). `ingest_ebert.py` records
+each run's exact embedding tokens and cost to `data/ingest-history.jsonl`, shown on the site's
+Evals & ops panel. OpenAI is the **only** embedding backend implemented:
 there is no provider switch, and the collection's dense field is fixed at 1536 dimensions, so
 changing embedder means a schema change and a full re-ingest.
 
@@ -387,10 +430,10 @@ RPC issued on *every single query* with no caching, unlike the client and embedd
 - **No partitions.** Curated essays and tens of thousands of reviews share one flat collection, so
   the review corpus can numerically swamp the 37 curated docs for generic queries. This is the most
   likely cause of "why did my Nolan question return three random 1997 review chunks."
-- **No query rewriting / HyDE / multi-query.** The raw user question is embedded verbatim. Follow-up
-  questions ("what about his other films?") are given history for *routing* but the RAG query itself
-  has no coreference resolution — so retrieval for follow-ups is materially worse than for
-  standalone questions.
+- **Follow-ups are rewritten; no HyDE / multi-query.** Since 2026-11-02 the `understand` node
+  rewrites a follow-up into a standalone question before retrieval (it used to embed "its score"
+  verbatim). A standalone question is still embedded as-is, so nameless descriptive queries remain
+  weak.
 - **No dedup at retrieval time.** Overlapping chunks from the same document can occupy several of
   the 6 slots.
 - **Insert-only, no upsert.** `auto_id=True` with plain `client.insert`; re-running `ingest.py`
@@ -502,11 +545,10 @@ counters reset on restart and on UTC midnight.
 
 `streaming=True` + `stream_usage=True` on the `ChatAnthropic` instance; LangGraph surfaces chunks as
 `on_chat_model_stream`; `main.py` re-emits them as `token` events tagged with `is_final`, which is
-`True` only while the current node is `synthesise` (`main.py:151`). The frontend renders only
-`is_final` tokens into the answer pane. **Known race:** `current_agent` is a single scalar updated
-on every `on_chain_start`, so during the parallel fan-out the `agent` label attached to a `token` or
-`llm_end` event can be attributed to whichever agent started most recently — token *totals* are
-correct (they're summed globally) but per-agent attribution during fan-out is not reliable.
+`True` only while the current node is `synthesise`. The frontend renders only `is_final` tokens
+into the answer pane. LLM events are attributed to the node in their `langgraph_node` metadata.
+(This fixed a race: attribution used to come from a single `current_agent` scalar, so during the
+fan-out a parallel agent's tokens could be labelled with whichever agent started last.)
 
 ### The compare / blind-judge mode
 
@@ -517,7 +559,8 @@ receives both answers in random A/B order (`random.choice`) and is explicitly *n
 retrieval. The mapping is revealed to the UI only after the verdict. It emits both its own
 `compare_*` events and the standard pipeline events so the observability panel keeps working. This
 is the closest thing the project has to an eval — but it's a **single-sample, LLM-judged, non-recorded
-demo**, not a measurement (see §10).
+demo**, not a measurement (see §10). The UI toggle was removed on 2026-11-02 (Claude already knows
+famous films, so it always looked bad); the endpoint stays for a planned "RAG value" eval.
 
 ---
 
@@ -528,7 +571,8 @@ demo**, not a measurement (see §10).
 | Endpoint | Auth | Notes |
 |---|---|---|
 | `GET /api/query?q&thread_id` | quota-gated | SSE pipeline stream |
-| `GET /api/compare?q` | quota-gated | SSE RAG-vs-no-RAG + blind judge; costs 1 credit for ~3 calls |
+| `GET /api/compare?q` | quota-gated | SSE RAG-vs-no-RAG + blind judge; costs 1 credit for ~3 calls (no longer in the UI) |
+| `GET /api/ops/overview` | public | allow-listed scheduled jobs + ingest/embedding history (`src/ops.py`) |
 | `GET /api/usage` | public | quota + daily token snapshot |
 | `GET /api/status` | public | Milvus / Anthropic / TMDB liveness + key-presence booleans |
 | `GET /api/knowledge` | public | corpus summary via Milvus `count(*)` + `query_iterator` |
@@ -552,12 +596,11 @@ Two consequences to state plainly:
 1. **Quotas, token counters, the rate-limit flag and the conversation checkpointer are all
    single-process.** Scaling to `--workers 4` today would multiply every quota by 4 and shard
    conversation history randomly across workers.
-2. **Two blocking calls sit on the event loop.** `pymilvus`'s `client.hybrid_search` /
-   `client.search` / `client.describe_collection` are synchronous gRPC calls invoked from
-   `async def retrieve` (`milvus_retriever.py:79`), and `web_search` instantiates a **synchronous**
-   `TavilyClient` and calls `client.search(...)` inside an `async def` (`web_search.py:29-34`).
-   Neither is wrapped in `run_in_executor`/`asyncio.to_thread`. Under concurrency these stall *all*
-   in-flight SSE streams, not just their own. This is the first thing to fix before any load test.
+2. **Blocking calls on the event loop — partly fixed.** `pymilvus`'s `client.hybrid_search` /
+   `client.search` now run in `asyncio.to_thread`. Still blocking: `client.describe_collection`
+   (`_has_hybrid_schema`, every query) and `web_search`'s **synchronous** `TavilyClient`
+   (`client.search(...)` inside an `async def`). Under concurrency these stall *all* in-flight SSE
+   streams, not just their own.
 
 ### Deployment topology
 
@@ -628,7 +671,8 @@ older port-80 / CF-Flexible arrangement — treat it as reference, not truth.
 ### What breaks first, in order
 
 1. **The single uvicorn worker + blocking calls.** Concurrent SSE streams share one event loop, and
-   `pymilvus` and Tavily calls block it. The first real symptom of load is unrelated users' token
+   the Tavily call and Milvus's `describe_collection` still block it (the Milvus searches no longer
+   do). The first real symptom of load is unrelated users' token
    streams stalling in lockstep. **Fix order:** wrap blocking calls in `asyncio.to_thread`, then move
    quota/checkpoint state to Redis, then run multiple workers.
 2. **`MemorySaver`.** The moment you add a second worker or restart the container, multi-turn
@@ -706,11 +750,11 @@ Name these before an interviewer finds them.
   repo. Errors go to stdout and Docker json-file logs. There is no structured logging, no error
   tracker, no metrics endpoint.
 - **No retries or circuit breakers** on any external call.
-- **Blocking I/O on the async event loop** — `pymilvus` (sync gRPC) and the sync `TavilyClient`.
+- **Blocking I/O on the async event loop** — the sync `TavilyClient` and `describe_collection`
+  (the Milvus searches moved to `asyncio.to_thread`).
 - **`describe_collection` RPC on every query** instead of a cached schema check.
 - **Test coverage is lopsided:** `usage.py` is well covered by pytest and the whole UI by Playwright;
   the graph, router, agents, `parse_llm_json` and the retriever have **no unit tests**.
-- **Per-agent token/telemetry attribution is racy during fan-out** (single `current_agent` scalar).
 - **Prompt injection is accepted risk** (SEC-6): user text plus RAG/Tavily/TMDB text all flow into
   Claude. The blast radius is genuinely small — the LLM has no tools, no secrets in context, and
   cannot execute anything — but the system does not sanitise or delimit untrusted content beyond
@@ -749,14 +793,14 @@ Name these before an interviewer finds them.
 ## 11. Likely interview questions, with strong answers
 
 **1. Why a supervisor-router instead of a ReAct agent?**
-Cost and latency determinism on an open, unauthenticated endpoint. My worst case is exactly 8 LLM
-calls and 3 supersteps; a ReAct loop's cost is unbounded, which on a paid key with no login is a
+Cost and latency determinism on an open, unauthenticated endpoint. My worst case is 10 LLM
+calls (8, plus a follow-up rewrite and a knowledge-base grader call when needed) and 5 supersteps; a ReAct loop's cost is unbounded, which on a paid key with no login is a
 financial-DoS vector. I also get parallelism for free — four I/O-bound agents run in one superstep —
 and the routing decision becomes an inspectable artefact I stream to the UI and serve from
 `/api/rules`. The cost is no self-correction: if retrieval returns junk, nothing re-queries.
 
 **2. Walk me through the state schema. Why no reducers?**
-`CineState` is a `TypedDict(total=False)` with 8 keys. No `Annotated` reducers, and that's safe by
+`CineState` is a `TypedDict(total=False)` with 11 keys. No `Annotated` reducers, and that's safe by
 construction: LangGraph raises `InvalidUpdateError` when two nodes in the same superstep write the
 same channel without one, and here every parallel agent writes a disjoint key while `history` is
 written only by `synthesise` in a later superstep. The moment I added a second node that appended to
@@ -862,10 +906,10 @@ content beyond prompt instructions, which I'd fix with explicit content fencing 
 before I put this behind anything sensitive.
 
 **17. Your backend is one uvicorn process. What happens under concurrency?**
-It's fully async so concurrent SSE streams multiplex fine *in principle* — but two calls block the
-loop: `pymilvus` is synchronous gRPC called from an `async def`, and the Tavily client is the sync
-one. Under load, unrelated users' token streams stall together. The fix is `asyncio.to_thread` around
-both, and that's step one before any multi-worker change — because going multi-worker first would
+It's fully async so concurrent SSE streams multiplex fine *in principle*. The Milvus searches now
+run in `asyncio.to_thread`; the sync Tavily client and the `describe_collection` check still block
+the loop, so under load unrelated users' token streams can stall together. Wrapping those too is
+step one before any multi-worker change — because going multi-worker first would
 break quotas and conversation state, which are both in-process.
 
 **18. How would you make this horizontally scalable?**
@@ -878,9 +922,11 @@ next constraint, and it has a documented path to distributed mode with the same 
 `thread_id` from the query string → LangGraph `configurable.thread_id` → `MemorySaver`. Before each
 run, `main.py` reads prior state with `pipeline.get_state(config)` and seeds `history` into the
 initial state; the synthesiser appends `{q, a}` and truncates to 10 turns; the supervisor folds the
-last 3 turns (answers truncated to 150 chars) into its routing prompt. Important caveat: history
-informs *routing* but not the RAG query — there's no coreference resolution, so "what about his other
-films?" retrieves poorly even when it routes correctly.
+last 3 turns (answers truncated to 150 chars) into its routing prompt. History used to inform
+only *routing*, so "who composed its score?" searched for "its score" and failed. Now the
+`understand` node rewrites a follow-up into a standalone question with one structured call (none on
+a first question); the agents and retrieval use the rewrite, while the final answer still sees the
+user's words and the history.
 
 **20. How is the Ebert corpus kept fresh without duplicating?**
 A nightly `flock`-guarded cron: `scrape_ebert.py --refresh-recent 1 --limit 800` re-queries the

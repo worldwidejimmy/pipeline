@@ -3,7 +3,8 @@
 > **What a live LLM brings to movie discovery that no static database can.**
 
 A multi-agent RAG pipeline built with LangGraph, Anthropic Claude, TMDB, Milvus, MusicBrainz, and optional Tavily.
-React + Vite frontend with a full LangSmith-style observability dashboard.
+React + Vite chat frontend: every answer shows a step trace of how it was produced, with an
+optional LangSmith-style observability dashboard (⚡) and a 🧪 Evals & ops panel.
 
 **Operations handoff:** [../HANDOFF.md](../HANDOFF.md) (Ebert scrape, `/api/rules`, generated `data/`, deployment notes).
 
@@ -39,7 +40,9 @@ how a database tagged it 20 years ago.
 ### What the Pipeline Does for "Show me good bank heist movies"
 
 ```
-User query → Supervisor (routes to: tmdb + rag + search [+ music when needed])
+User query → Understand (a follow-up is rewritten as a standalone question; no LLM call on a first question)
+  → KB lookup (knowledge base first: relevant / nothing useful / Haiku grader in the unsure band)
+  → Supervisor (routes to: tmdb + rag + search [+ music when needed]; RAG joins if the KB is relevant)
   │
   ├─▶ TMDB Agent
   │     • Extracts intent: genre=Crime/Thriller, sort=vote_average
@@ -47,8 +50,8 @@ User query → Supervisor (routes to: tmdb + rag + search [+ music when needed])
   │     • Gets full details: cast, ratings, similar films
   │
   ├─▶ RAG Agent  
-  │     • Embeds query → searches Milvus knowledge base
-  │     • Retrieves: critical analysis of heist genre, Rififi as genre origin,
+  │     • Reuses the passages the KB lookup judged useful (no second search)
+  │     • e.g. critical analysis of heist genre, Rififi as genre origin,
   │       Heat's influence on modern crime cinema, Dog Day Afternoon context
   │     • LLM generates citation-grounded analysis
   │
@@ -57,7 +60,8 @@ User query → Supervisor (routes to: tmdb + rag + search [+ music when needed])
         • Gets: current critical consensus, 2024 releases, hidden gem listicles
         • LLM generates news-grounded summary
 
-Synthesiser: merges all three into a ranked, explained, tone-aware list
+Synthesiser: merges by question, not by source — one ranked, explained, tone-aware list,
+sources credited inline, disagreements noted where they occur
 ```
 
 **Output:** A curated list with ratings, explanations of *why* each film works,
@@ -72,9 +76,9 @@ filter UI can produce.
 ┌─────────────────────────────────────────────────────────┐
 │                    React + Vite Frontend                 │
 │  ┌──────────────┐  ┌────────────────────────────────┐   │
-│  │  Query +     │  │    Observability Dashboard      │   │
-│  │  Answer      │  │  ┌──────┬──────┬───────┬─────┐ │   │
-│  │  Panel       │  │  │Graph │Time- │Events │Ctx  │ │   │
+│  │  Chat +      │  │  Observability Dashboard (⚡)   │   │
+│  │  step trace  │  │  ┌──────┬──────┬───────┬─────┐ │   │
+│  │  per answer  │  │  │Graph │Time- │Events │Ctx  │ │   │
 │  │              │  │  │      │line  │ Log   │     │ │   │
 │  └──────────────┘  └────────────────────────────────┘   │
 └──────────────────────────┬──────────────────────────────┘
@@ -86,6 +90,7 @@ filter UI can produce.
 │  /api/trending → TMDB trending                          │
 │  /api/search  → TMDB quick search                       │
 │  /api/rules   → routing rules JSON (Rules modal)        │
+│  /api/ops/overview → jobs + ingest history (Evals & ops)│
 └────────────┬──────────────┬──────────────┬──────────────┘
              │              │              │
     ┌────────▼───┐  ┌───────▼──┐  ┌───────▼──────┐
@@ -104,10 +109,11 @@ filter UI can produce.
 ### LangGraph State Machine
 
 ```
-START → supervisor_route
+START → understand → kb_lookup → supervisor_route
            │
      routing decision
      (tmdb|rag|search|music|tmdb+music|tmdb+rag|tmdb+search|rag+search|all)
+     + KB adjustment (relevant → add rag; nothing useful → drop rag)
            │
     ┌──────┼──────┐
     ▼      ▼      ▼
@@ -127,13 +133,20 @@ The backend transforms LangGraph's `astream_events()` into typed frontend events
 | Event | Triggered When |
 |---|---|
 | `pipeline_start` | Query submitted |
-| `routing_decision` | Supervisor picks agents |
+| `rewrite` | A follow-up was rewritten as a standalone question |
+| `kb_lookup` | Knowledge-base verdict and how it was decided (score vs. thresholds, or grader) |
+| `routing_decision` | Supervisor picks agents (raw decision, keyword or model, KB adjustment) |
 | `agent_start` / `agent_end` | Each node activates / completes |
 | `llm_start` / `llm_end` | LLM call begins / finishes (with token counts) |
 | `token` | Streaming token from any LLM call |
 | `tmdb_results` | TMDB agent returns movie data |
-| `chunks_retrieved` | RAG agent returns chunks with similarity scores |
-| `done` | Pipeline complete (latency, total tokens, agents used) |
+| `chunks_retrieved` | RAG agent's passages with cosine similarity |
+| `search_results` / `music_results` | Web / MusicBrainz results |
+| `guardrail` | LinkGuard removed links from the answer |
+| `done` | Pipeline complete (latency, total tokens, agents used, model) |
+
+LLM events are attributed to the LangGraph node that made the call (`langgraph_node`
+metadata), so parallel agents' tokens no longer get mixed up.
 
 ---
 
@@ -215,9 +228,28 @@ Or point it at the pipeline project's corpus to reuse those docs:
 
 ---
 
-## Frontend Observability Dashboard
+## Frontend
 
-The right half of the UI is a real-time observability panel with 4 tabs:
+**Chat.** Questions appear as chat messages; the question box docks at the bottom once a
+conversation starts. Each answer keeps a **step trace** (small gray italics): the follow-up
+rewrite, the knowledge-base verdict and how it was decided, routing (the router's raw decision
+as a chip, e.g. `tmdb+rag`, plus any knowledge-base adjustment), each source's result with a
+source chip (themoviedb.org, Milvus vector DB, Tavily API, MusicBrainz), per step the free
+lookups vs. Claude calls with purpose and tokens in/out, what the combiner received, guardrail
+link removals and the model. Older turns fold to one line: sources · seconds · tokens in
+(cached %) / out · model.
+
+**🧪 Evals & ops** (header): each eval tier (what / how / when / latest); scheduled jobs (UTC and
+local time, what each does, whether it uses an LLM, last run); ingest & embeddings (source →
+chunking → embedding → index → query time, plus the nightly ingest history: new reviews,
+passages embedded, tokens, cost, index size). Data: `GET /api/ops/overview`.
+
+The old "Compare RAG vs no-RAG" toggle was removed from the UI (Claude already knows famous
+films, so it always looked bad); `/api/compare` remains for evals.
+
+### Observability dashboard (optional, ⚡ header button)
+
+A real-time observability panel with 4 tabs:
 
 **Graph** — Animated pipeline node diagram. Nodes pulse when active, dim when not
 routed to. Shows routing decision and per-node latency.
@@ -238,7 +270,10 @@ routing decision · agents used.
 
 ## Roadmap
 
-- [ ] Multi-turn conversation (LangGraph `MemorySaver` for session memory)
+- [x] Multi-turn conversation (LangGraph `MemorySaver`) with follow-up rewriting
+- [x] Knowledge base first, with a calibrated relevance gate
+- [ ] "RAG value" eval to replace the removed compare toggle (does grounding improve answers, esp. for reviews newer than the model?)
+- [ ] Test whether the RAG agent's summary call is redundant (combiner reads passages directly)
 - [ ] Streaming tokens shown in real-time in Events tab
 - [ ] "Why this recommendation?" — explainability mode
 - [ ] Watchlist with persistent storage (PostgreSQL)
@@ -259,16 +294,20 @@ cineai/
 │   ├── src/
 │   │   ├── config.py              Central config (env vars, LLM/embedding selection)
 │   │   ├── main.py                FastAPI app + SSE event streaming
+│   │   ├── kb_gate.py             Relevance-gate thresholds + RAG-agent adjustment
+│   │   ├── ops.py                 Public Evals & ops data (allow-listed)
 │   │   ├── agents/
+│   │   │   ├── understand.py      Follow-up → standalone question
+│   │   │   ├── kb_lookup.py       Knowledge base first (search + gate + grader)
 │   │   │   ├── supervisor.py      Routes queries to appropriate agents
 │   │   │   ├── tmdb_agent.py      Intent extraction → TMDB API → grounded answer
-│   │   │   ├── rag_agent.py       Milvus retrieval → citation-based answer
+│   │   │   ├── rag_agent.py       kb_lookup's passages → citation-based answer
 │   │   │   ├── search_agent.py    Tavily web search → grounded answer
 │   │   │   ├── music_agent.py     MusicBrainz → grounded answer
 │   │   │   └── synthesiser.py     Merges all agent outputs → final answer
 │   │   ├── tools/
 │   │   │   ├── tmdb_client.py     Async TMDB API wrapper (search, discover, person)
-│   │   │   ├── milvus_retriever.py  Vector similarity search
+│   │   │   ├── milvus_retriever.py  Hybrid search + per-passage cosine similarity
 │   │   │   ├── musicbrainz_client.py MusicBrainz HTTP client
 │   │   │   └── web_search.py      Tavily wrapper with graceful degradation
 │   │   └── graph/
@@ -287,6 +326,8 @@ cineai/
 │   │   ├── types.ts               All SSE event types + TMDB types
 │   │   ├── index.css              Dark theme design system
 │   │   └── components/
+│   │       ├── StepTrace.tsx      Per-answer step trace + one-line summary
+│   │       ├── OpsModal.tsx       🧪 Evals & ops
 │   │       ├── PipelineGraph.tsx  Animated node diagram
 │   │       ├── RoutingRulesModal.tsx  Supervisor rules from /api/rules
 │   │       ├── AgentTimeline.tsx  Gantt-style execution timeline

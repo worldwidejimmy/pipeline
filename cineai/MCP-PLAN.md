@@ -18,6 +18,12 @@ leaves synthesis with the caller's model, which is the right split for tool use.
 | `https://smartmoviesearch.com/mcp` | none, rate-limited | `search_knowledge_base`, `find_titles`, `get_title`, `find_person`, `get_artist` | ≈$0 (one embedding, or a free API) |
 | `https://smartmoviesearch.com/mcp/agent` | **OAuth 2.1 bearer** | `ask` (the full multi-agent pipeline) | one pipeline run (~$0.001) |
 
+`search_knowledge_base` returns each result's cosine `similarity` to the query (not the
+rank-only RRF score), the `best_similarity`, and a calibrated `relevant` verdict: `"yes"`
+(≥ 0.60), `"no"` (< 0.45) or `"unsure"`. These are the site's knowledge-base gate thresholds
+(`src/kb_gate.py`), without its grader: on "unsure" the caller's model judges. The pinned
+tool snapshot (`evals/fixtures/mcp_tools.json`) was regenerated for this change.
+
 Built on the official Python SDK (`mcp` 2.x, `MCPServer`), Streamable HTTP, **stateless**
 (no server-side session state, so nothing to hijack and nothing to clean up). It runs in
 the existing FastAPI process, reusing its Milvus/TMDB/MusicBrainz clients.

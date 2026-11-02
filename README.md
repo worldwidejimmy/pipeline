@@ -3,11 +3,13 @@
 [![CI](https://github.com/worldwidejimmy/pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/worldwidejimmy/pipeline/actions/workflows/ci.yml)
 [![evals](https://img.shields.io/endpoint?url=https%3A%2F%2Fsmartmoviesearch.com%2Fapi%2Fevals%2Fbadge)](cineai/EVALS-PLAN.md)
 
-> 🚀 **Live demo:** [smartmoviesearch.com](https://smartmoviesearch.com) — open access, no login. Each visitor gets a few free searches per hour (the header shows remaining searches and the day's token usage); the access password lifts the limit and unlocks an admin view. Try the **🆚 Compare RAG vs. no-RAG** toggle to see grounded vs. ungrounded answers side by side — a **blind LLM judge** then rules on which answer is stronger (it sees the two answers in random order and isn't told which used retrieval; its labels are then matched to the columns, so Answer A is always the RAG side), and the AI-Pipeline panel shows the compare run's own graph, timeline, and events. Powered by **Anthropic Claude** — the app automatically runs the newest model of its cost tier (default: Haiku). The ⚙️ status button shows live service health **and the nightly eval results** (routing, retrieval, LLM-judged answer quality, canaries, latency, the MCP server, and a prompt-injection red team). It's also an **MCP server**: `claude mcp add --transport http smartmoviesearch https://smartmoviesearch.com/mcp`.
+> 🚀 **Live demo:** [smartmoviesearch.com](https://smartmoviesearch.com) — open access, no login. Each visitor gets a few free searches per hour (the header shows remaining searches and the day's token usage); the access password lifts the limit and unlocks an admin view. It's a chat: ask a follow-up ("Who composed its score?") and it is rewritten into a standalone question before the agents see it. Every answer carries a **step trace** — the follow-up rewrite, whether the knowledge base had anything (and how that was decided), the routing, each source's result, the Claude calls with their tokens, and any links the guardrail removed; the graph/timeline/events panel sits behind the ⚡ button. The **🧪 Evals & ops** button shows every eval tier, the scheduled jobs and the nightly ingest/embedding history. Powered by **Anthropic Claude** — the app automatically runs the newest model of its cost tier (default: Haiku). The ⚙️ status button shows live service health **and the nightly eval results** (routing, retrieval, LLM-judged answer quality, canaries, latency, the MCP server, and a prompt-injection red team). It's also an **MCP server**: `claude mcp add --transport http smartmoviesearch https://smartmoviesearch.com/mcp`.
 
 A production agentic RAG system built with **LangGraph + Milvus**, deployed as [SmartMovieSearch](https://smartmoviesearch.com) — a natural-language movie intelligence platform.
 
-A **Supervisor** agent intelligently routes each user question to the right
+Each question is first made standalone (a follow-up is rewritten using the conversation),
+then checked against the knowledge base (**knowledge base first**, behind a calibrated
+relevance gate). A **Supervisor** agent then routes it to the right
 sub-agent — a **RAG agent** that searches a curated knowledge base (markdown docs plus optional **Roger Ebert** review text from the Internet Archive), a **TMDB agent**
 that queries live movie and TV data, a **Music agent** (MusicBrainz), a **Web Search agent** for current news, or any
 combination — then synthesises the results into a single coherent streaming answer.
@@ -20,8 +22,10 @@ combination — then synthesises the results into a single coherent streaming an
 
 ```mermaid
 flowchart TD
-    UserQuery[User Query] --> Supervisor
+    UserQuery[User Query] --> Understand
     subgraph langgraph [LangGraph State Machine]
+        Understand["Understand<br/>(rewrite a follow-up)"] --> KBLookup["KB lookup<br/>(relevance gate)"]
+        KBLookup --> Supervisor
         Supervisor -->|"route: rag"| RAGAgent[RAG Agent]
         Supervisor -->|"route: tmdb"| TMDBAgent[TMDB Agent]
         Supervisor -->|"route: search"| SearchAgent[Web Search Agent]
@@ -31,7 +35,7 @@ flowchart TD
         SearchAgent -->|search_result| Synthesise
         MusicAgent -->|music_result| Synthesise
     end
-    RAGAgent --> Milvus[(Milvus\nVector DB)]
+    KBLookup --> Milvus[(Milvus\nVector DB)]
     TMDBAgent --> TMDB[TMDB API]
     SearchAgent --> WebAPI[Tavily API]
     MusicAgent --> MB[MusicBrainz API]
@@ -46,8 +50,11 @@ deployable via Docker Compose.
 
 | Key | Type | Description |
 |---|---|---|
-| `question` | `str` | User question — set at entry |
+| `question` | `str` | The question the agents work on (a follow-up's standalone rewrite) |
+| `user_question` | `str` | The user's own words — the final answer and the history use these |
+| `kb` | `dict` | Knowledge-base lookup: relevant?, how decided, best similarity, useful passages |
 | `routing` | `str` | `"tmdb"` \| `"rag"` \| `"search"` \| `"music"` \| combinations |
+| `routing_by` | `str` | `"keyword"` (deterministic rule) or `"model"` (LLM classifier) |
 | `rag_result` | `str\|None` | Output from the RAG agent |
 | `tmdb_result` | `str\|None` | Output from the TMDB agent |
 | `search_result` | `str\|None` | Output from the web search agent |
@@ -145,9 +152,13 @@ pipeline/
 │   │   ├── src/
 │   │   │   ├── main.py             FastAPI app — SSE streaming, /api/status, /api/knowledge
 │   │   │   ├── config.py           Centralised config (reads .env)
+│   │   │   ├── kb_gate.py          Relevance-gate thresholds + the RAG-agent adjustment (pure)
+│   │   │   ├── ops.py              Public "Evals & ops" data (allow-listed)
 │   │   │   ├── agents/
+│   │   │   │   ├── understand.py   Rewrites a follow-up into a standalone question
+│   │   │   │   ├── kb_lookup.py    Knowledge base first: search + relevance gate (+ grader)
 │   │   │   │   ├── supervisor.py   Routing node — classifies query to agent(s)
-│   │   │   │   ├── rag_agent.py    Hybrid Milvus retrieval (BM25 + dense, RRF fusion)
+│   │   │   │   ├── rag_agent.py    Grounded answer from the passages kb_lookup judged useful
 │   │   │   │   ├── tmdb_agent.py   TMDB search, discovery, filmography comparison
 │   │   │   │   ├── search_agent.py Tavily web search
 │   │   │   │   ├── music_agent.py  MusicBrainz + grounded answers
@@ -155,7 +166,7 @@ pipeline/
 │   │   │   ├── graph/
 │   │   │   │   └── pipeline.py     LangGraph StateGraph (compiled, multi-turn)
 │   │   │   └── tools/
-│   │   │       ├── milvus_retriever.py  Hybrid search wrapper
+│   │   │       ├── milvus_retriever.py  Hybrid search (BM25 + dense, RRF) + per-passage cosine similarity
 │   │   │       ├── tmdb_client.py       TMDB API client
 │   │   │       └── musicbrainz_client.py MusicBrainz client
 │   │   ├── docs/                   RAG knowledge base (markdown)
@@ -167,8 +178,10 @@ pipeline/
 │   │
 │   └── frontend/
 │       └── src/
-│           ├── App.tsx             Main app — SSE client, streaming answer, panels
+│           ├── App.tsx             Main app — SSE client, chat conversation, optional panels
 │           └── components/
+│               ├── StepTrace.tsx    Per-answer step trace (rewrite, KB verdict, routing, sources, calls)
+│               ├── OpsModal.tsx     🧪 Evals & ops: eval tiers, scheduled jobs, ingest/embeddings
 │               ├── StatusModal.tsx  Live service health + API key status
 │               ├── KnowledgeModal.tsx  Browse RAG knowledge base
 │               ├── RoutingRulesModal.tsx Routing rules from GET /api/rules
@@ -185,6 +198,26 @@ pipeline/
 ---
 
 ## How It Works
+
+```
+START → understand → kb_lookup → supervisor_route → fan-out [tmdb · rag · search · music] → synthesise → END
+```
+
+### 0. Understand (follow-ups) and knowledge base first
+
+The source agents each see one question, not the conversation, so follow-ups used to fail
+("Who composed its score?" searched TMDB for "its score"). With history present, one
+structured Claude call rewrites the message into a standalone question ("Who composed the
+score for Inception (2010)?"). The agents use the rewrite; the final answer still sees the
+user's own words and the history. A first question costs no LLM call.
+
+Then every question searches the knowledge base **before routing**. Retrieval always
+returns its nearest passages, so a gate decides whether they're useful, on the best dense
+cosine similarity of the top passages: **≥ 0.60 relevant, < 0.45 nothing useful** (no LLM
+call either way); in between, a small Haiku grader decides and picks the useful passages.
+Relevant → the RAG agent always joins the fan-out and reuses those passages (no second
+search). Nothing useful → the RAG agent is skipped, saving its LLM call (web search is the
+fallback if nothing else is left). See *Knowledge base first: a calibrated gate* below.
 
 ### 1. Routing (Supervisor)
 
@@ -206,13 +239,9 @@ fans out to all of them simultaneously:
 
 ```python
 # src/graph/pipeline.py
-def dispatch(state) -> list[str]:
-    routing = state["routing"]
-    agents = []
-    if "tmdb"   in routing: agents.append("tmdb_agent")
-    if "rag"    in routing: agents.append("rag_agent")
-    if "search" in routing: agents.append("search_agent")
-    return agents or ["rag_agent"]
+def _dispatch(state) -> list[str]:
+    agents = list(mapping.get(state["routing"], ["tmdb_agent"]))   # e.g. "tmdb+rag" → 2 agents
+    return apply_kb(agents, state["kb"]["relevant"])               # knowledge-base adjustment
 ```
 
 ### 3. Hybrid RAG (BM25 + Dense)
@@ -227,6 +256,10 @@ dense_req   = AnnSearchRequest(query_dense,  "dense_vector",  {"metric_type": "I
 results     = client.hybrid_search([sparse_req, dense_req], RRFRanker(k=60))
 ```
 
+Milvus calls run off the event loop (`asyncio.to_thread`). Each passage also carries its
+cosine similarity to the query: the RRF score depends only on rank, so it can't say whether
+anything is relevant, and the gate needs a score that can.
+
 ### 4. SSE streaming
 
 The FastAPI backend streams structured events over SSE — routing decisions,
@@ -240,11 +273,18 @@ pipeline_start → routing_decision → agent_start →
 agent_end → done
 ```
 
+LLM events are attributed to the LangGraph node that really made the call (`langgraph_node`
+metadata), so parallel agents' calls and tokens are no longer mixed up. The UI turns these
+events into each answer's step trace: free lookups vs. Claude calls (purpose, tokens in/out)
+per step, what the combiner received, and the model. Older turns fold to one line:
+sources · seconds · tokens in (cached %) / out · model.
+
 ### 5. Synthesis
 
 All agent results land in state. The synthesiser always invokes the LLM
 (never short-circuits), ensuring token streaming reaches the frontend for
-every query.
+every query. It merges **by question, not by source**: one combined answer (e.g. one list),
+sources credited inline, disagreements noted where they occur.
 
 ---
 
@@ -260,7 +300,7 @@ claude mcp add --transport http smartmoviesearch https://smartmoviesearch.com/mc
 
 | Tool | What it does |
 |---|---|
-| `search_knowledge_base` | Hybrid BM25 + dense (RRF) search over the curated guides and Ebert review excerpts |
+| `search_knowledge_base` | Hybrid BM25 + dense (RRF) search over the curated guides and Ebert review excerpts; returns each result's cosine `similarity`, the `best_similarity` and a calibrated `relevant` verdict (`yes` / `no` / `unsure` — on `unsure` the caller's model judges) |
 | `find_titles` / `get_title` | TMDB search, then details: crew, cast, similar titles |
 | `find_person` | TMDB person lookup with biography and best-known titles |
 | `get_artist` | MusicBrainz artist and discography |
@@ -313,6 +353,29 @@ attacks, the subtle ones repeated, graded on what the attack achieved):
   guarantee bought nothing measurable.
 
 `cineai/backend/src/guardrails.py`, red-team cases `cineai/evals/datasets/redteam.jsonl`.
+Poisoned knowledge-base passages are planted where retrieval now happens (the
+knowledge-base lookup) and forced past the relevance gate, the worst case.
+
+---
+
+## Knowledge base first: a calibrated gate
+
+Retrieval always returns *something*, so "did the knowledge base have anything?" needs a
+signal. The hybrid search's RRF score can't be it: it depends only on rank. The best **dense
+cosine similarity** (`text-embedding-3-small`) of the top passages can. Calibrated on 68
+labelled questions (the 34 T2 retrieval cases + 34 in `evals/datasets/kb_gate.jsonl`,
+answerable and not), tuned on one split and checked on a held-out one:
+
+- **≥ 0.60 → relevant:** zero false "relevant" on both splits. **< 0.45 → nothing useful.**
+  Neither costs an LLM call.
+- **Between them**, answerable and unanswerable questions overlap, so a Haiku grader decides
+  and keeps only the useful passages: 17/18 right on that band.
+- Dense similarity separated the classes far better than BM25 scores.
+
+Effect: the RAG agent joins whenever the knowledge base is relevant (even if the router didn't
+pick it) and is skipped when it isn't. The cost per question moved from $0.0008 to about
+$0.0010–0.0011 (the RAG agent runs more often, plus the rewrite/grader calls).
+Code: `src/kb_gate.py`, `src/agents/kb_lookup.py`; experiment: `cineai/evals/experiments/`.
 
 ---
 
@@ -387,6 +450,8 @@ Tracing is explicit, not ambient (`cineai/backend/src/tracing.py`):
 | `GET /api/status` | Live health: Claude / Milvus / TMDB + API key presence |
 | `GET /api/knowledge` | RAG knowledge base summary (sources + chunk counts) |
 | `GET /api/rules` | Routing decisions, keyword overrides, and LLM rule bullets (for the Rules modal) |
+| `GET /api/ops/overview` | Public, allow-listed: scheduled jobs (schedule + last run) and the ingest/embedding history (for 🧪 Evals & ops) |
+| `GET /api/compare?q=<question>` | RAG vs. no-RAG answers + blind judge (no longer in the UI; kept for evals) |
 | `GET /api/trending` | Trending movies from TMDB |
 | `GET /api/history?thread_id=<id>` | Conversation history for a thread |
 | `GET /api/health` | Health check |
@@ -399,6 +464,9 @@ Tracing is explicit, not ambient (`cineai/backend/src/tracing.py`):
 
 - [x] **Automated evals** — routing accuracy, retrieval hit@k/MRR/content coverage, full-pipeline canaries, cost/latency, the MCP interface, a prompt-injection red team, and a calibrated LLM judge (groundedness, unanswerable questions) — nightly, gated, alerting. See `cineai/EVALS-PLAN.md`.
 - [x] **MCP server**: public retrieval tools plus an OAuth 2.1-protected agent tool, with a threat model and a nightly MCP eval tier. See `cineai/MCP-PLAN.md`.
+- [x] **Follow-up rewriting + knowledge base first** — standalone questions for the agents; calibrated relevance gate decides whether the RAG agent runs
+- [ ] **"RAG value" eval** — replaces the removed compare toggle: measure (e.g. with the existing blind-judge compare code) whether knowledge-base grounding improves answers, especially for reviews newer than the model's training data
+- [ ] **Is the RAG agent's summary call redundant?** — test letting the combiner read the passages directly
 - [ ] **Redis semantic cache** — skip the LLM for repeated or near-identical queries
 - [ ] **Streaming tokens in Event Log** — surface token stream in the observability panel alongside the answer
 - [ ] **User-provided documents** — API endpoint to ingest uploaded files into a per-session collection

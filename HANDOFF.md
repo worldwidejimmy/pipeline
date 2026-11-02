@@ -6,7 +6,7 @@ This document is for anyone taking over the **movie, TV, and music** multi-agent
 
 ## What this product is
 
-- **Frontend:** React (Vite), SSE client, observability panels (graph, timeline, events, RAG chunks).
+- **Frontend:** React (Vite), SSE client, chat-style conversation with a per-answer step trace; optional observability panels (graph, timeline, events, RAG chunks) behind the ⚡ header button; 🧪 Evals & ops modal.
 - **Backend:** FastAPI, LangGraph pipeline, **Anthropic Claude** LLM (Haiku/Sonnet/Opus via `src/llm.py`), Milvus hybrid RAG (BM25 + dense), TMDB, optional Tavily, MusicBrainz (no key).
 - **Deployment:** Docker Compose in `cineai/docker-compose.yml`; production site referenced from root README.
 
@@ -16,22 +16,26 @@ This document is for anyone taking over the **movie, TV, and music** multi-agent
 
 | Path | Role |
 |------|------|
-| `cineai/backend/src/main.py` | FastAPI, SSE streaming, `/api/query`, **`/api/compare`**, **`/api/usage`**, `/api/status`, `/api/knowledge`, **`/api/rules`**, health |
+| `cineai/backend/src/main.py` | FastAPI, SSE streaming, `/api/query`, **`/api/compare`**, **`/api/usage`**, `/api/status`, `/api/knowledge`, **`/api/rules`**, **`/api/ops/overview`**, health |
 | `cineai/backend/src/usage.py` | **Open-access control**: per-IP rolling rate limit + daily token accounting + unlimited-token check |
-| `cineai/backend/src/compare.py` | **RAG-vs-no-RAG** side-by-side compare stream (two concurrent LLM calls) |
-| `cineai/backend/src/graph/pipeline.py` | LangGraph: supervisor, agents, synthesiser |
+| `cineai/backend/src/compare.py` | **RAG-vs-no-RAG** side-by-side compare stream (two concurrent LLM calls). The UI toggle was removed; the endpoint stays for evals |
+| `cineai/backend/src/graph/pipeline.py` | LangGraph: understand → kb_lookup → supervisor → agents (fan-out) → synthesiser |
+| `cineai/backend/src/agents/understand.py` | Rewrites a follow-up into a standalone question (one structured call; none on a first question) |
+| `cineai/backend/src/agents/kb_lookup.py` | **Knowledge base first**: searches Milvus before routing; Haiku grader for the unsure band |
+| `cineai/backend/src/kb_gate.py` | Gate thresholds (0.60 / 0.45 dense cosine) + `apply_kb` (RAG agent joins if relevant, skipped if not) |
+| `cineai/backend/src/ops.py` | Public, allow-listed data for the 🧪 Evals & ops modal (`GET /api/ops/overview`) |
 | `cineai/backend/src/agents/supervisor.py` | Routing: **keyword overrides** + LLM; **`SUPERVISOR_LLM_RULE_BULLETS`** (single source for UI API) |
 | `cineai/backend/src/agents/tmdb_agent.py` | TMDB: titles, TV vs movie guardrails, markdown links in answers |
-| `cineai/backend/src/agents/rag_agent.py` | Milvus hybrid retrieval |
+| `cineai/backend/src/agents/rag_agent.py` | Grounded answer from the passages `kb_lookup` judged useful (no second search) |
 | `cineai/backend/src/agents/music_agent.py` | MusicBrainz + grounded answers + links |
 | `cineai/backend/src/agents/search_agent.py` | Tavily |
-| `cineai/backend/src/agents/synthesiser.py` | Merge agent outputs; preserve markdown links |
+| `cineai/backend/src/agents/synthesiser.py` | Merge agent outputs by question (not by source), sources credited inline; preserve markdown links |
 | `cineai/backend/src/tools/musicbrainz_client.py` | MusicBrainz HTTP client |
 | `cineai/backend/scripts/ingest.py` | Ingest `.md`/`.txt` from `docs/` into **same** Milvus collection |
 | `cineai/backend/scripts/scrape_ebert.py` | Roger Ebert reviews via **Wayback Machine** (live site blocks bots) |
-| `cineai/backend/scripts/ingest_ebert.py` | JSONL → chunked embeddings → Milvus **append** |
+| `cineai/backend/scripts/ingest_ebert.py` | JSONL → chunked embeddings → Milvus **append**; records each run's exact embedding tokens/cost to `data/ingest-history.jsonl` |
 | `cineai/backend/docs/` | Curated markdown corpus (decades, directors, TV, music, etc.) |
-| `cineai/backend/data/` | **Gitignored** generated files: `ebert_urls.json`, `ebert_reviews.jsonl`, `scrape.log`, `nightly-logs/`. **Volume-mounted** into the backend container (so ingest/cron can read it). |
+| `cineai/backend/data/` | **Gitignored** generated files: `ebert_urls.json`, `ebert_reviews.jsonl`, `scrape.log`, `nightly-logs/`, `ingest-history.jsonl`. **Volume-mounted** into the backend container (so ingest/cron can read it). |
 | `cineai/nightly_update.sh` | **Nightly RAG refresh** — scrape (capped `--limit 800`) + ingest new reviews; emails a summary when it adds any. |
 | `cineai/backup.sh` | **Nightly backup** — tars `.env` + `data/` to `~/backups/smartmoviesearch` (keeps 14). Milvus is derived; restore via `ingest_ebert.py`. |
 | `cineai/devops_check.py` | **Nightly DevOps health check** — containers/app/disk/mem/backup/cert/ingest/evals → pings healthchecks.io (`smartmovie_search_devops`); emails only when 🔴 (or the ping fails). |
@@ -39,7 +43,9 @@ This document is for anyone taking over the **movie, TV, and music** multi-agent
 | `cineai/healthcheck.py` | healthchecks.io pinger (ok → ping, red → `/fail`). Sends only the one-line issue summary + the path of the saved report (`cineai/backend/data/ops-logs/<kind>-<UTC stamp>.log`), never the report itself (third party). Ping URLs in `~/.config/healthchecks.env` (`<slug>=https://hc-ping.com/<uuid>` per check, chmod 600, never in the repo). No key / ping fails → the caller emails instead. |
 | `cineai/send_email.py` | Shared SMTP notifier (reads `SMTP_*`/`ADMIN_EMAIL` from `backend/.env`; no-ops if unset). |
 | `cineai/frontend/src/components/RoutingRulesModal.tsx` | **Rules** UI (loads `/api/rules`) |
-| `cineai/frontend/src/components/{UsageBadge,CompareView,PasswordGate}.tsx` | Token meter + free-quota chip; RAG compare two-column view; optional sign-in modal |
+| `cineai/frontend/src/components/{UsageBadge,PasswordGate}.tsx` | Token meter + free-quota chip; optional sign-in modal |
+| `cineai/frontend/src/components/StepTrace.tsx` | Per-answer step trace (rewrite, KB verdict, routing chip, source chips, Claude calls + tokens, LinkGuard removals, model); older turns fold to a one-line summary |
+| `cineai/frontend/src/components/OpsModal.tsx` | 🧪 Evals & ops: eval tiers, scheduled jobs, ingest & embeddings (loads `/api/ops/overview`) |
 
 ---
 
@@ -71,7 +77,9 @@ This document is for anyone taking over the **movie, TV, and music** multi-agent
    - **Idempotent:** `--skip-existing` dedupes on a normalized slug (`norm_slug` strips the `ebert/` and `amp/` prefixes), so the AMP mirror pages and canonical pages collapse to one review and re-runs never duplicate.
    - **Bounded memory:** embeds + inserts in batches of `EMBED_BATCH` (256) — embedding the whole corpus at once would OOM this small shared host.
    - Optional: `--limit N`.
-   - Current state: **~12,636 distinct reviews / ~99k chunks** ingested (37 markdown docs add ~539 more).
+   - Chunking: reviews use `RecursiveCharacterTextSplitter` (900 chars, 120 overlap, paragraph → line → sentence separators). Embedding: `text-embedding-3-small`, 1536 dims, $0.02 per 1M tokens.
+   - Each run appends its exact embedding tokens/cost to `data/ingest-history.jsonl` (runs before that are estimated at 135 tokens/passage, the measured mean); the history is shown in the site's 🧪 Evals & ops modal.
+   - Current state: the index holds **~122k passages** (reviews + guides); the live size is in the Evals & ops ingest tab.
 
 ### Nightly automation (INSTALLED) + notifications
 
@@ -114,13 +122,15 @@ Most counters are in-memory (reset on backend redeploy); the **IP blacklist** pe
 - **Auth lockout:** `/api/auth` locks an IP after `AUTH_MAX_FAILS` (5) failures for `AUTH_LOCKOUT_SECONDS` (900s).
 - **Admin screen** (🛡️, header — visible only when signed in): `GET /api/admin/usage` (per-IP requests + tokens today) and `POST /api/admin/blacklist` ({ip, action}). Both gated by the access token (`usage.is_unlimited`).
 
-`GET /api/compare?q=` answers the same question twice (grounded on Milvus chunks vs. bare model) and streams both via `compare_token {side}` / `compare_side_end` / `compare_done` events. Costs **one** free credit despite two LLM calls.
+`GET /api/compare?q=` answers the same question twice (grounded on Milvus chunks vs. bare model) and streams both via `compare_token {side}` / `compare_side_end` / `compare_done` events. Costs **one** free credit despite two LLM calls. **No longer in the UI** (the toggle always looked bad because Claude already knows famous films); the endpoint stays so its blind-judge code can back a "RAG value" eval.
 
 ## Routing and the Rules UI
 
+- **Before routing:** `understand` rewrites a follow-up into a standalone question (agents use it; the answer still sees the user's words), then `kb_lookup` searches the knowledge base and gates it (best dense cosine ≥ 0.60 relevant, < 0.45 nothing useful, a Haiku grader in between).
+- **Knowledge-base adjustment** (`kb_gate.apply_kb`, after the router): relevant → the RAG agent joins (reusing `kb_lookup`'s passages); nothing useful → the RAG agent is dropped, with web search as the fallback if nothing else is left.
 - **Keyword overrides** (`_FORCE_MUSIC_KEYWORDS`, `_FORCE_TMDB_KEYWORDS`) run **before** the LLM so small models cannot mis-route obvious cases (e.g. “lyrics” → `music`).
 - **LLM rules** for the supervisor are defined once in **`SUPERVISOR_LLM_RULE_BULLETS`** in `supervisor.py` (injected into the supervisor system prompt); **`GET /api/rules`** imports the same tuple so the Rules modal cannot drift from runtime behavior.
-- Header button **Routing rules** opens the modal (tabs: agents, routes, keywords, LLM rules).
+- Header button **Routing rules** opens the modal (tabs: agents, routes, keywords, LLM rules); it also lists the pre-routing steps and the knowledge-base adjustment.
 
 ---
 
@@ -145,6 +155,8 @@ Most counters are in-memory (reset on backend redeploy); the **IP blacklist** pe
 - **Copyright / terms:** Ebert full text is ingested for RAG from archived copies; confirm your use case complies with Internet Archive and site terms. When expanding to TV/music corpora, prefer CC BY-SA sources (Wikipedia, TVmaze, Last.fm) and avoid sites whose ToS ban scraping/AI use (Rotten Tomatoes, Metacritic, Letterboxd).
 - **AMP duplicates (resolved):** the scraper captured both `rogerebert.com/reviews/<slug>` and `/reviews/amp/<slug>`; ingest now normalizes the slug so they dedupe. ~6,160 pre-existing duplicate mirrors were removed.
 - **CDX completeness:** Missing years after timeouts may need manual CDX retries or quarterly splits. The Wayback CDX endpoint intermittently 503s — `--refresh-recent` handles it gracefully (skips that pass).
+- **"RAG value" eval (to build):** replaces the removed compare toggle — measure (e.g. with the existing blind-judge compare code) whether knowledge-base grounding improves answers, especially for reviews newer than the model's training data.
+- **RAG agent summary call:** test whether it's redundant (the combiner could read the passages directly).
 - **Star ratings** in scraped JSON may be `null` if the archived HTML layout differs; parser targets `article.entry` and `.star-rating` from legacy rogerebert layouts.
 
 ---

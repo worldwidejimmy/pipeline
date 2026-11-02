@@ -39,12 +39,16 @@ User (browser)
                         │  Server-Sent Events stream
                    LangGraph StateGraph
                         │
+                   understand         ← rewrites a follow-up as a standalone question
+                        │
+                   kb_lookup          ← knowledge base first: calibrated relevance gate
+                        │
               ┌─────────┴──────────┐
               │   supervisor_route  │  ← decides which agents to invoke
-              └──┬──────┬──────┬───┘
-                 │      │      │  (parallel fan-out)
+              └──┬──────┬──────┬───┘     (RAG joins if the KB is relevant, skipped if not)
+                 │      │      │  (parallel fan-out; + music_agent → MusicBrainz)
            tmdb_agent  rag_agent  search_agent
-           TMDB API    Milvus     Tavily Web
+           TMDB API    KB passages Tavily Web
                  │      │      │
               └──┴──────┴──────┴───┘
                         │
@@ -73,12 +77,14 @@ Milvus is a distributed vector database that stores the movie knowledge corpus (
 - **Sparse search** (BM25, computed natively by Milvus 2.5+): exact keyword matching for proper nouns, titles, and specific terms
 - **RRF fusion**: combines both ranked lists into one, getting the best of precision and recall
 
+**Knowledge base first.** Every question searches the knowledge base *before* routing. Retrieval always returns its nearest passages, so a gate decides whether they are useful. The RRF score can't: it depends only on rank. The best dense cosine similarity of the top passages can. Calibrated on 68 labelled questions: **≥ 0.60 is relevant** (zero false "relevant" on both the tuning and the held-out split), **< 0.45 is nothing useful**, and neither needs an LLM call; in the band between, a small Haiku grader decides and picks the useful passages (17/18 correct on that band). Dense similarity separated the classes far better than BM25. When the knowledge base is relevant, the RAG agent always joins and reuses those passages; when it isn't, the RAG agent is skipped, saving its LLM call.
+
 **Why not just embeddings?** A query for "Christopher Nolan" should find documents that contain those exact words, not just semantically similar ones. BM25 handles this; embeddings alone can miss it.
 
 ### Anthropic Claude — LLM Inference
 
-Every LLM call — supervisor routing, per-agent intent extraction, and final
-synthesis — goes through a single factory, `backend/src/llm.py:get_chat()`, which
+Every LLM call — follow-up rewriting, the knowledge-base grader, supervisor routing,
+per-agent intent extraction, and final synthesis — goes through a single factory, `backend/src/llm.py:get_chat()`, which
 returns a `ChatAnthropic`. The model tier is one server-wide setting
 (`DEFAULT_MODEL_TIER` = `haiku` | `sonnet` | `opus`), so the whole pipeline can be
 moved between price/quality points with an env change rather than per-agent edits.
@@ -100,7 +106,7 @@ The backend is a FastAPI application that exposes a single streaming endpoint: `
 
 ### React + Vite Frontend
 
-The frontend is a React/TypeScript SPA built with Vite. It maintains a live `EventSource` connection per query and renders the pipeline in real time across four tabs: an animated **pipeline graph** (node status), a **Gantt timeline** (agent latency), a **typed event log**, and a **context panel** (retrieved chunks and TMDB cards). A dark/light theme toggle persists preference to `localStorage`.
+The frontend is a React/TypeScript SPA built with Vite, laid out as a chat. It maintains a live `EventSource` connection per query, and every answer carries a **step trace**: the follow-up rewrite, the knowledge-base verdict and how it was decided, the routing, each source's result, the free lookups vs. Claude calls (purpose, tokens in/out), what the combiner received, any links the guardrail removed, and the model. Older turns fold to a one-line summary. An optional panel (⚡) adds an animated **pipeline graph**, a **Gantt timeline**, a **typed event log**, and a **context panel** (retrieved chunks and TMDB cards). A **🧪 Evals & ops** panel shows every eval tier, the scheduled jobs and the nightly ingest/embedding history. A dark/light theme toggle persists preference to `localStorage`.
 
 ### Docker Compose + Nginx + Cloudflare
 
@@ -112,12 +118,14 @@ The full stack (Milvus + etcd + MinIO + backend + frontend) runs as Docker Compo
 
 *"Show me good bank heist movies"*
 
-1. **Supervisor** receives the question, calls Claude to classify intent → routes to all three agents in parallel: `tmdb + rag + search`
-2. **TMDB agent** calls Claude to extract intent (`discover`, genre: Crime/Thriller) → hits TMDB API → calls Claude to write a grounded answer citing specific films and ratings
-3. **RAG agent** embeds the query with OpenAI → runs hybrid BM25+dense search in Milvus → retrieves chunks from the heist film corpus → calls Claude to synthesise a knowledge-based answer
-4. **Search agent** sends the query to Tavily → retrieves current web results → calls Claude to ground the answer
-5. **Synthesiser** receives all three agent outputs, calls Claude to merge them into a single coherent answer, deduplicating overlapping film recommendations and citing sources
-6. **SSE stream** delivers `pipeline_start`, `routing_decision`, `agent_start/end`, `token` (×N), `tmdb_results`, `chunks_retrieved`, and `done` events — the frontend renders each one as it arrives
+1. **Understand**: a first question passes through unchanged (no LLM call); a follow-up such as *"Who composed its score?"* would be rewritten into a standalone question first
+2. **Knowledge-base lookup** embeds the question with OpenAI and runs hybrid BM25+dense search in Milvus; the relevance gate decides whether the passages are useful (≥ 0.60 relevant, < 0.45 not, a Haiku grader in between)
+3. **Supervisor** calls Claude to classify intent → routes to all three agents in parallel: `tmdb + rag + search`
+4. **TMDB agent** calls Claude to extract intent (`discover`, genre: Crime/Thriller) → hits TMDB API → calls Claude to write a grounded answer citing specific films and ratings
+5. **RAG agent** reuses the knowledge-base passages (no second search) → calls Claude to write a knowledge-based answer
+6. **Search agent** sends the query to Tavily → retrieves current web results → calls Claude to ground the answer
+7. **Synthesiser** receives all three agent outputs and calls Claude to merge them by question, not by source: one list, overlapping films deduplicated, sources credited inline, disagreements noted where they occur
+8. **SSE stream** delivers `pipeline_start`, `kb_lookup`, `routing_decision`, `agent_start/end`, `token` (×N), `tmdb_results`, `chunks_retrieved`, and `done` events — the frontend renders each one as it arrives
 
 Total latency: typically 3–6 seconds. The user sees tokens appearing within ~1 second of submitting the query.
 
@@ -129,8 +137,9 @@ Total latency: typically 3–6 seconds. The user sees tokens appearing within ~1
 |---|---|
 | **Hybrid retrieval** | Sparse BM25 + dense embeddings fused with RRF — outperforms either alone |
 | **Parallel agents** | TMDB, RAG, and web search run concurrently, not sequentially |
-| **Multi-turn memory** | `MemorySaver` + `thread_id` gives the supervisor conversation context across turns |
-| **Observable pipeline** | Every internal event streams to the UI — the AI process is not a black box |
+| **Multi-turn memory** | `MemorySaver` + `thread_id`; follow-ups are rewritten into standalone questions so every agent understands "its" and "his" |
+| **Knowledge base first** | A relevance gate calibrated on labelled questions decides whether the curated corpus has anything, usually with no LLM call |
+| **Observable pipeline** | Every answer shows its own step trace (sources, Claude calls, tokens, model) — the AI process is not a black box |
 | **Filmography comparison** | `movie_and_person` intent fetches movie detail + actor filmography in parallel; ranks by rating |
 | **Structured error UX** | Rate limits, auth failures, and network errors surface as categorised, friendly banners |
 | **Production deployed** | Live on OVH VPS behind Cloudflare with Docker Compose, nginx reverse proxy, and SSL |

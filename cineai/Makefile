@@ -93,7 +93,7 @@ test-unit: ## Backend unit tests (usage.py etc.) — free, no Docker/API keys ne
 		$(BACKEND_DIR)/.tests-venv/bin/pip install -q fastapi pytest "mcp==2.3.0" "PyJWT[crypto]>=2.10.0"
 	cd $(BACKEND_DIR) && .tests-venv/bin/python -m pytest -q tests/
 
-test-e2e: ## Playwright browser test of the running stack (costs 1 search + tokens; E2E_LIVE=1 adds a live-site check)
+test-e2e: ## Playwright browser test of the running stack (costs 2 searches + tokens; E2E_LIVE=1 adds a live-site check)
 	cd tests && npm install --no-audit --no-fund && npx playwright install chromium && node e2e.mjs
 
 test-api: ## Smoke test the running backend API

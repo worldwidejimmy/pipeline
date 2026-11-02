@@ -2,9 +2,10 @@
 
 A production agentic RAG system (**LangGraph + Milvus + Anthropic Claude**) deployed as
 [smartmoviesearch.com](https://smartmoviesearch.com) — a natural-language movie/TV/music intelligence
-platform. A **Supervisor** agent routes each question to sub-agents (**RAG** over a curated KB incl.
-optional Roger Ebert reviews, **TMDB**, **Music**/MusicBrainz, **Web Search**) and synthesizes a single
-streaming answer. The app lives under `cineai/`.
+platform. Graph: `understand` (rewrites a follow-up into a standalone question) → `kb_lookup`
+(knowledge base first, calibrated relevance gate) → **Supervisor** routes to sub-agents (**RAG** over a
+curated KB incl. optional Roger Ebert reviews, **TMDB**, **Music**/MusicBrainz, **Web Search**) →
+synthesizes a single streaming answer. The app lives under `cineai/`.
 
 > ⚠️ **This is a PUBLIC GitHub repo** (`worldwidejimmy/pipeline`) — one of the few public ones. Assume every commit, message, diff, and author identity is world-visible. **Never commit secrets/keys/`.env`.** Commit with a real name/email (not the box default `ubuntu@<vps-host>`), and avoid leaking internal URLs/hostnames in commit trailers.
 >
@@ -25,10 +26,12 @@ streaming answer. The app lives under `cineai/`.
 
 ## Build / test / run
 - Run stack: `cd cineai && docker compose up -d`; inspect: `docker compose ps` / `docker compose logs -f <svc>`.
-- Tasks/tests: `cineai/Makefile` — run `make` to list targets. `make test-e2e` = Playwright browser test of the running stack (costs 1 search + tokens). `make eval-t2` = retrieval evals (free, no LLM); run after ANY chunking/TOP_K/embedding/corpus change — it gates on `cineai/evals/baseline.json` (bumping the baseline is a deliberate, reviewable commit). Also `make eval-t1` (routing), `make eval-t4` (canaries + cost/latency), `make eval-t6` (MCP interface), `make eval-t7` (red team), `make eval-nightly`; these run unattended nightly via `cineai/eval_nightly.sh` (cron 04:20 UTC, emails on regression) and show on `/admin` + the ⚙️ status modal. Run `make eval-t1 eval-t4` after any prompt, routing or model change. Details: `cineai/HANDOFF.md` → Evals; design: `cineai/EVALS-PLAN.md`.
+- Tasks/tests: `cineai/Makefile` — run `make` to list targets. `make test-e2e` = Playwright browser test of the running stack (costs 2 searches + tokens: a question and a follow-up). `make eval-t2` = retrieval evals (free, no LLM); run after ANY chunking/TOP_K/embedding/corpus change — it gates on `cineai/evals/baseline.json` (bumping the baseline is a deliberate, reviewable commit). Also `make eval-t1` (routing), `make eval-t4` (canaries + cost/latency), `make eval-t6` (MCP interface), `make eval-t7` (red team), `make eval-nightly`; these run unattended nightly via `cineai/eval_nightly.sh` (cron 04:20 UTC, emails on regression) and show on `/admin`, the ⚙️ status modal and the 🧪 Evals & ops modal. Run `make eval-t1 eval-t4` after any prompt, routing or model change. Details: `cineai/HANDOFF.md` → Evals; design: `cineai/EVALS-PLAN.md`.
 - **MCP server** (`src/mcp_server.py`, threat model `cineai/MCP-PLAN.md`): tool definitions are pinned in `cineai/evals/fixtures/mcp_tools.json`, so a changed tool must regenerate that file (a reviewed diff) and pass `make eval-t6`. Keep tools read-only, pass third-party text through `clean()`, and never forward a client's token upstream.
 - **Guardrails** (`src/guardrails.py`): third-party data enters prompts only via `wrap_untrusted()` + `UNTRUSTED_RULE`; answers stream through `LinkGuard`; structured extraction uses `llm.extract()`. Run `make eval-t7` (red team) after any prompt, agent or tool change.
 - **Model:** `DEFAULT_MODEL_TIER` is a cost tier that auto-resolves to the newest model in it (`src/llm.py`); `MODEL_PIN` overrides. Never hardcode a model id or `temperature` at a call site — go through `get_chat()`. System prompts go through `llm.system_blocks(static, dynamic)` (prompt caching): fixed instructions only in `static`, never per-request data.
+- **KB relevance gate** (`src/kb_gate.py`): thresholds (0.60 / 0.45 on dense cosine) are calibrated for `text-embedding-3-small` + this corpus; re-run `cineai/evals/experiments/kb_gate_experiment.py` after changing either. The MCP `search_knowledge_base` verdict uses the same thresholds.
+- **Public ops data** (`GET /api/ops/overview`, `src/ops.py`, shown in the 🧪 Evals & ops modal) is an explicit allow-list: never add log text, paths, hostnames, backup locations or issue details.
 - `cineai/devops_check.py` — health/devops checks · `cineai/backup.sh` — backups.
 
 ## Gotchas

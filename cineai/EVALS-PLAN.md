@@ -132,6 +132,20 @@ you're optimising the metric rather than the system.
 3. **T1 routing** ✅ · 4. **T4 canaries** ✅ (in-process, not via e2e — no quota) ·
 5. **T3 judge** ✅ (weekly) · **T5** ✅ (from the T4 runs). Operational detail: `HANDOFF.md` → Evals.
 
+Since then: T6 (MCP interface) and T7 (red team) were added; T7 now plants poisoned RAG
+passages at the knowledge-base lookup's retrieval (forced past the relevance gate, the worst
+case). The relevance gate's own thresholds were calibrated as an experiment
+(`evals/experiments/README.md`). Latest after that change (2026-11-02): t1 48/48, t2 33/34
+(MRR 0.79), t4 8/8, t5 about $0.0010–0.0011 per question (was $0.0008), t6 6/6, t7 14/14.
+
+## Next
+- **"RAG value" eval.** The UI's compare toggle was removed (Claude already knows famous films,
+  so no-RAG always looked as good). Measure instead, e.g. with the existing blind-judge compare
+  code (`compare.py`), whether knowledge-base grounding improves answers, especially for
+  reviews newer than the model's training data.
+- **Is the RAG agent's summary call redundant?** Test letting the combiner read the passages
+  directly.
+
 ## Open questions — resolved
 - *Where do results live?* `evals/results/` (bind-mounted, gitignored): JSONL history per tier
   + `latest.json`, shown on `/admin`, the status modal (summary), the ops email and dashboard.
