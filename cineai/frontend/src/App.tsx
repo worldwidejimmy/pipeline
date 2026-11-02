@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { PipelineEvent, TmdbMovie, Usage, RagChunk, CompareTokens } from './types'
+import { PipelineEvent, TmdbMovie, Usage } from './types'
 import { PipelineGraph } from './components/PipelineGraph'
 import { AgentTimeline } from './components/AgentTimeline'
 import { EventLog } from './components/EventLog'
@@ -11,7 +11,7 @@ import { StatusModal } from './components/StatusModal'
 import { RoutingRulesModal } from './components/RoutingRulesModal'
 import { PasswordGate } from './components/PasswordGate'
 import { UsageBadge } from './components/UsageBadge'
-import { CompareView } from './components/CompareView'
+import { StepTrace } from './components/StepTrace'
 import { FeedbackBar } from './components/FeedbackBar'
 import { getAccessToken, clearAccessToken, apiFetch, makeSSEUrl, fetchUsage } from './api'
 
@@ -29,7 +29,16 @@ type ObsTab = 'graph' | 'timeline' | 'events' | 'context'
 interface Turn {
   q: string
   a: string
-  runId?: string     // server's answer id, for 👍/👎 (absent for compare turns)
+  runId?: string             // server's answer id, for 👍/👎
+  events: PipelineEvent[]    // the turn's pipeline steps (tokens excluded), kept for its step trace
+}
+
+// Events that describe a step (everything except the token stream).
+const STEP_EVENTS = ['pipeline_start', 'kb_lookup', 'agent_start', 'agent_end', 'routing_decision',
+  'chunks_retrieved', 'tmdb_results', 'music_results', 'search_results', 'guardrail', 'llm_start', 'llm_end', 'done'] as const
+
+function loadPref(key: string, fallback: boolean): boolean {
+  try { const v = localStorage.getItem(key); return v === null ? fallback : v === '1' } catch { return fallback }
 }
 
 function generateThreadId(): string {
@@ -54,24 +63,14 @@ export default function App() {
   const [showKnowledge, setShowKnowledge] = useState(false)
   const [showStatus,    setShowStatus]    = useState(false)
   const [showRules,     setShowRules]     = useState(false)
+  // The pipeline graph/timeline/events panel: optional now that the chat shows each step.
+  const [showPipeline,  setShowPipeline]  = useState(() => loadPref('sms-pipeline-panel', false))
+  const [pendingQ,      setPendingQ]      = useState('')   // the question being answered (input clears on send)
 
   // Open-access usage / sign-in
   const [usage,      setUsage]      = useState<Usage | null>(null)
   const [showSignIn, setShowSignIn] = useState(false)
   const [signInReason, setSignInReason] = useState<string | undefined>(undefined)
-
-  // RAG-vs-no-RAG compare mode
-  // Default is the normal RAG pipeline; compare is opt-in per session (never persisted).
-  const [compareMode,  setCompareMode]  = useState(false)
-  const [compareActive, setCompareActive] = useState(false)
-  const [cmpRag,    setCmpRag]    = useState('')
-  const [cmpBase,   setCmpBase]   = useState('')
-  const [cmpChunks, setCmpChunks] = useState<RagChunk[]>([])
-  const [cmpRagTokens,  setCmpRagTokens]  = useState<CompareTokens | null>(null)
-  const [cmpBaseTokens, setCmpBaseTokens] = useState<CompareTokens | null>(null)
-  const [cmpJudge,      setCmpJudge]      = useState('')
-  const [cmpJudgeASide, setCmpJudgeASide] = useState<'rag' | 'base' | null>(null)
-  const [cmpShownFirst, setCmpShownFirst] = useState<'rag' | 'base' | null>(null)
 
   const refreshUsage = useCallback(() => {
     fetchUsage().then(setUsage).catch(() => {})
@@ -81,6 +80,10 @@ export default function App() {
     document.documentElement.setAttribute('data-theme', theme)
     localStorage.setItem('sms-theme', theme)
   }, [theme])
+
+  useEffect(() => {
+    try { localStorage.setItem('sms-pipeline-panel', showPipeline ? '1' : '0') } catch { /* private mode */ }
+  }, [showPipeline])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -113,13 +116,6 @@ export default function App() {
     refreshUsage()
   }, [token, refreshUsage])
 
-  const resetCompare = useCallback(() => {
-    setCompareActive(false)
-    setCmpRag(''); setCmpBase('')
-    setCmpChunks([]); setCmpRagTokens(null); setCmpBaseTokens(null)
-    setCmpJudge(''); setCmpJudgeASide(null); setCmpShownFirst(null)
-  }, [])
-
   const startNewConversation = useCallback(() => {
     esRef.current?.close()
     setThreadId(generateThreadId())
@@ -129,8 +125,8 @@ export default function App() {
     setQuery('')
     setStream(false)
     setTurnNum(0)
-    resetCompare()
-  }, [resetCompare])
+    setPendingQ('')
+  }, [])
 
   const openSignIn = useCallback((reason?: string) => {
     setSignInReason(reason)
@@ -154,7 +150,8 @@ export default function App() {
     if (!q.trim() || isStreaming) return
     esRef.current?.close()
 
-    resetCompare()
+    setPendingQ(q.trim())
+    setQuery('')
     setEvents([])
     setAnswer('')
     setStream(true)
@@ -166,11 +163,13 @@ export default function App() {
 
     let currentAnswer = ''
     let runId: string | undefined
+    const turnEvents: PipelineEvent[] = []
 
     const addEvent = (type: string, e: MessageEvent) => {
       try {
-        const payload = JSON.parse(e.data)
-        setEvents(prev => [...prev, { ...payload, type }])
+        const ev = { ...JSON.parse(e.data), type } as PipelineEvent
+        if (type !== 'token') turnEvents.push(ev)
+        setEvents(prev => [...prev, ev])
       } catch { /* ignore parse errors */ }
     }
 
@@ -178,13 +177,9 @@ export default function App() {
       addEvent('pipeline_start', e); setTurnNum(p => p + 1)
       try { runId = JSON.parse(e.data).run_id ?? undefined } catch { /* older backend */ }
     })
-    es.addEventListener('agent_start',      e => addEvent('agent_start', e))
-    es.addEventListener('agent_end',        e => addEvent('agent_end', e))
-    es.addEventListener('routing_decision', e => addEvent('routing_decision', e))
-    es.addEventListener('llm_start',        e => addEvent('llm_start', e))
-    es.addEventListener('llm_end',          e => addEvent('llm_end', e))
-    es.addEventListener('chunks_retrieved', e => addEvent('chunks_retrieved', e))
-    es.addEventListener('tmdb_results',     e => addEvent('tmdb_results', e))
+    for (const t of STEP_EVENTS) {
+      if (t !== 'pipeline_start' && t !== 'done') es.addEventListener(t, e => addEvent(t, e as MessageEvent))
+    }
     es.addEventListener('pipeline_error', e => {
       addEvent('error', e)
       try {
@@ -216,8 +211,9 @@ export default function App() {
       setStream(false)
       es.close()
       if (currentAnswer) {
-        setHistory(prev => [...prev, { q: q.trim(), a: currentAnswer, runId }])
+        setHistory(prev => [...prev, { q: q.trim(), a: currentAnswer, runId, events: turnEvents }])
         setAnswer('')  // the turn lives in history now — keeping it would render twice
+        setPendingQ('')
       }
       refreshUsage()
     })
@@ -225,97 +221,16 @@ export default function App() {
     es.onerror = () => {
       setStream(prev => { if (prev) es.close(); return false })
     }
-  }, [isStreaming, threadId, resetCompare, openSignIn, refreshUsage])
+  }, [isStreaming, threadId, openSignIn, refreshUsage])
 
-  const runCompare = useCallback((q: string) => {
-    if (!q.trim() || isStreaming) return
-    esRef.current?.close()
-
-    setEvents([])
-    setAnswer('')
-    setStream(true)
-    setCompareActive(true)
-    setCmpRag(''); setCmpBase('')
-    setCmpChunks([]); setCmpRagTokens(null); setCmpBaseTokens(null)
-    setCmpJudge(''); setCmpJudgeASide(null); setCmpShownFirst(null)
-    setTurnNum(p => p + 1)
-
-    let rag = '', base = '', judge = ''
-    const url = makeSSEUrl(`/api/compare?q=${encodeURIComponent(q.trim())}`)
-    const es = new EventSource(url)
-    esRef.current = es
-
-    const addEvent = (type: string, e: MessageEvent) => {
-      try {
-        const payload = JSON.parse(e.data)
-        setEvents(prev => [...prev, { ...payload, type }])
-      } catch { /* ignore parse errors */ }
-    }
-
-    // Standard pipeline events → observability panel (graph/timeline/log/metrics)
-    for (const t of ['pipeline_start', 'agent_start', 'agent_end', 'llm_start', 'llm_end', 'done']) {
-      es.addEventListener(t, e => addEvent(t, e as MessageEvent))
-    }
-
-    es.addEventListener('chunks_retrieved', (e: MessageEvent) => {
-      addEvent('chunks_retrieved', e)
-      try { setCmpChunks(JSON.parse(e.data).chunks ?? []) } catch { /* ignore */ }
-    })
-    es.addEventListener('compare_token', (e: MessageEvent) => {
-      const p = JSON.parse(e.data)
-      if (p.side === 'rag')  { rag  += p.content; setCmpRag(rag) }
-      else                   { base += p.content; setCmpBase(base) }
-    })
-    es.addEventListener('compare_side_end', (e: MessageEvent) => {
-      const p = JSON.parse(e.data)
-      const t = { prompt_tokens: p.prompt_tokens, completion_tokens: p.completion_tokens }
-      if (p.side === 'rag') setCmpRagTokens(t); else setCmpBaseTokens(t)
-    })
-    es.addEventListener('judge_start', (e: MessageEvent) => {
-      try {
-        const p = JSON.parse(e.data)
-        setCmpJudgeASide(p.a_side ?? null)
-        setCmpShownFirst(p.shown_first ?? null)
-      } catch { /* ignore */ }
-    })
-    es.addEventListener('judge_token', (e: MessageEvent) => {
-      try {
-        judge += JSON.parse(e.data).content ?? ''
-        setCmpJudge(judge)
-      } catch { /* ignore */ }
-    })
-    es.addEventListener('compare_done', () => {
-      setStream(false); es.close(); refreshUsage()
-    })
-    es.addEventListener('pipeline_error', e => {
-      try {
-        const p = JSON.parse(e.data)
-        if (p.code === 'ip_limit') openSignIn(p.message)
-        else setErrorBanner({ code: p.code ?? 'pipeline_error', message: p.message ?? 'Unknown error' })
-      } catch { setErrorBanner({ code: 'pipeline_error', message: 'An unexpected error occurred.' }) }
-      setStream(false); es.close(); setCompareActive(false); refreshUsage()
-    })
-    es.addEventListener('compare_error', (e: MessageEvent) => {
-      try {
-        const p = JSON.parse(e.data)
-        if (p.side === 'rag') setCmpRag(prev => prev || `⚠️ ${p.message}`)
-        else setCmpBase(prev => prev || `⚠️ ${p.message}`)
-      } catch { /* ignore */ }
-    })
-    es.onerror = () => { setStream(prev => { if (prev) es.close(); return false }) }
-  }, [isStreaming, openSignIn, refreshUsage])
-
-  const run = useCallback((q: string) => {
-    if (compareMode) runCompare(q)
-    else runQuery(q)
-  }, [compareMode, runCompare, runQuery])
+  const run = runQuery
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     run(query)
   }
 
-  const showTrending = !answer && !isStreaming && history.length === 0 && !compareActive
+  const showTrending = !answer && !isStreaming && history.length === 0
 
   const ERROR_ICONS: Record<string, string> = {
     rate_limit:       '⏳',
@@ -331,7 +246,7 @@ export default function App() {
   }
 
   return (
-    <div className="app">
+    <div className={`app ${showPipeline ? '' : 'app--solo'}`}>
 
       {/* ── Optional sign-in modal (unlock unlimited) ───────────────────── */}
       {showSignIn && (
@@ -412,6 +327,15 @@ export default function App() {
               </span>
             )}
             <button
+              className={`header-icon-btn ${showPipeline ? 'header-icon-btn--on' : ''}`}
+              onClick={() => setShowPipeline(v => !v)}
+              title={showPipeline ? 'Hide the AI pipeline panel' : 'Show the AI pipeline panel (graph, timeline, events, retrieved context)'}
+              aria-label="AI pipeline panel"
+              aria-pressed={showPipeline}
+            >
+              ⚡
+            </button>
+            <button
               className="header-icon-btn"
               onClick={() => setShowStatus(true)}
               title="Service status"
@@ -458,7 +382,7 @@ export default function App() {
               onClick={startNewConversation}
               title="Start a new conversation"
             >
-              + New Search
+              + New chat
             </button>
           </div>
         </div>
@@ -485,20 +409,9 @@ export default function App() {
               />
             </div>
             <button className="query-btn" type="submit" disabled={isStreaming || !query.trim()}>
-              {isStreaming ? '…' : compareMode ? 'Compare' : 'Search'}
+              {isStreaming ? '…' : 'Ask'}
             </button>
           </form>
-
-          <label className="compare-toggle" title="Answer the same question with and without retrieval, side by side. Costs one search.">
-            <input
-              type="checkbox"
-              checked={compareMode}
-              onChange={e => setCompareMode(e.target.checked)}
-              disabled={isStreaming}
-            />
-            <span className="compare-toggle-track"><span className="compare-toggle-thumb" /></span>
-            <span className="compare-toggle-label">🆚 Compare RAG vs. no-RAG</span>
-          </label>
 
           {/* Honest about where a question goes (backend src/tracing.py redacts before upload). */}
           <div className="privacy-note">
@@ -589,6 +502,7 @@ export default function App() {
                   SmartMovieSearch
                 </div>
               </div>
+              <StepTrace events={turn.events} latest={i === history.length - 1} />
               <div className="history-a answer-content">
                 <ReactMarkdown>{turn.a}</ReactMarkdown>
               </div>
@@ -596,50 +510,22 @@ export default function App() {
             </div>
           ))}
 
-          {/* RAG vs no-RAG comparison */}
-          {compareActive && (
+          {/* Current streaming answer */}
+          {(answer || isStreaming) && (
             <div className="current-turn">
               <div className="history-q">
                 <span className="history-q-icon">You</span>
-                {query || '…'}
+                {pendingQ || '…'}
               </div>
-              <CompareView
-                question={query}
-                ragText={cmpRag}
-                baseText={cmpBase}
-                chunks={cmpChunks}
-                ragTokens={cmpRagTokens}
-                baseTokens={cmpBaseTokens}
-                judgeText={cmpJudge}
-                judgeASide={cmpJudgeASide}
-                judgeShownFirst={cmpShownFirst}
-                streaming={isStreaming}
-              />
-            </div>
-          )}
-
-          {/* Current streaming answer */}
-          {!compareActive && (answer || isStreaming) && (
-            <div className="current-turn">
-              {history.length > 0 && (
-                <div className="history-q">
-                  <span className="history-q-icon">You</span>
-                  {query || '…'}
-                </div>
-              )}
               <div className="ai-indicator">
                 <div className="ai-indicator-badge">
                   <span className={`ai-indicator-dot ${isStreaming ? 'streaming' : ''}`} />
                   SmartMovieSearch
                 </div>
               </div>
+              <StepTrace events={events} live={isStreaming} latest />
               <div className="answer-content">
                 <ReactMarkdown>{answer}</ReactMarkdown>
-                {isStreaming && !answer && (
-                  <span style={{ color: 'var(--text-dim)', fontStyle: 'italic', fontSize: 13 }}>
-                    Agents thinking<span className="loading-dots"><span>.</span><span>.</span><span>.</span></span>
-                  </span>
-                )}
                 {isStreaming && <span className="cursor-blink" />}
               </div>
             </div>
@@ -649,8 +535,8 @@ export default function App() {
         </div>
       </div>
 
-      {/* ── Right panel: AI Pipeline ────────────────────────────────────────── */}
-      <div className="panel-right">
+      {/* ── Right panel: AI Pipeline (optional; ⚡ in the header) ─────────────── */}
+      {showPipeline && <div className="panel-right">
         <div className="obs-header">
           <span className="obs-title">⚡ AI Pipeline</span>
           <span className={`obs-badge ${isStreaming ? 'live' : ''}`}>
@@ -689,7 +575,7 @@ export default function App() {
         </div>
 
         <MetricsBar events={events} isStreaming={isStreaming} />
-      </div>
+      </div>}
     </div>
   )
 }

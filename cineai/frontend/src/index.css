@@ -1845,7 +1845,7 @@ html, body, #root {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   Open access: usage badge, sign-in modal close, compare toggle + view
+   Open access: usage badge, sign-in modal close
    ══════════════════════════════════════════════════════════════════════════ */
 
 /* ── Usage badge (header) ─────────────────────────────────────────────────── */
@@ -1913,124 +1913,6 @@ html, body, #root {
 }
 .pg-close:hover { background: var(--border-lit); color: var(--text); }
 .pg-card { position: relative; }
-
-/* ── Compare toggle ───────────────────────────────────────────────────────── */
-.compare-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 10px;
-  cursor: pointer;
-  user-select: none;
-}
-.compare-toggle input { display: none; }
-.compare-toggle-track {
-  position: relative;
-  width: 34px;
-  height: 18px;
-  background: var(--surface3);
-  border: 1px solid var(--border-lit);
-  border-radius: 999px;
-  transition: background 0.2s;
-}
-.compare-toggle-thumb {
-  position: absolute;
-  top: 1px;
-  left: 1px;
-  width: 14px;
-  height: 14px;
-  background: var(--text-muted);
-  border-radius: 50%;
-  transition: transform 0.2s, background 0.2s;
-}
-.compare-toggle input:checked + .compare-toggle-track { background: color-mix(in srgb, var(--blue) 35%, transparent); }
-.compare-toggle input:checked + .compare-toggle-track .compare-toggle-thumb {
-  transform: translateX(16px);
-  background: var(--blue);
-}
-.compare-toggle-label { font-size: 12px; color: var(--text-muted); font-weight: 500; }
-.compare-toggle input:checked ~ .compare-toggle-label { color: var(--text); }
-
-/* ── Compare view ─────────────────────────────────────────────────────────── */
-.compare-view { margin-top: 8px; }
-.cmp-banner {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  padding: 10px 12px;
-  margin-bottom: 12px;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-.cmp-banner-icon { font-size: 18px; line-height: 1.4; }
-.cmp-banner-title { font-size: 13px; font-weight: 600; color: var(--text); }
-.cmp-banner-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; line-height: 1.5; }
-
-.cmp-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-@media (max-width: 720px) { .cmp-grid { grid-template-columns: 1fr; } }
-
-.cmp-col {
-  display: flex;
-  flex-direction: column;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-top: 3px solid var(--border-lit);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-.cmp-col-head {
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface2);
-}
-.cmp-col-title { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--text); }
-.cmp-letter { font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #fff; padding: 2px 7px; border-radius: 999px; }
-.cmp-col-sub { display: block; font-size: 10px; color: var(--text-muted); margin-top: 2px; }
-.cmp-col-body { padding: 12px; font-size: 13px; line-height: 1.6; flex: 1; min-height: 60px; }
-.cmp-thinking { color: var(--text-muted); font-style: italic; font-size: 12px; }
-.cmp-col-foot {
-  padding: 6px 12px;
-  border-top: 1px solid var(--border);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--text-muted);
-}
-.cmp-foot-dim { color: var(--text-dim); }
-
-.cmp-judge {
-  display: flex;
-  flex-direction: column;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-top: 3px solid var(--border-lit);
-  border-radius: var(--radius);
-  overflow: hidden;
-  margin-top: 12px;
-}
-
-.cmp-sources { margin-top: 12px; }
-.cmp-sources > summary {
-  cursor: pointer;
-  font-size: 12px;
-  color: var(--text-muted);
-  padding: 6px 0;
-}
-.cmp-sources-list { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
-.cmp-source {
-  padding: 8px 10px;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-.cmp-source-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
-.cmp-source-name { font-family: var(--font-mono); font-size: 11px; color: var(--blue); }
-.cmp-source-score { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
-.cmp-source-text { font-size: 11px; color: var(--text-muted); line-height: 1.5; }
 
 /* ── Admin modal ───────────────────────────────────────────────────────────── */
 .admin-error { color: var(--red); font-size: 13px; padding: 10px 0; }
@@ -2122,3 +2004,37 @@ html, body, #root {
 .adm-signin button:disabled { opacity: .5; cursor: default; }
 .adm .admin-table { display: block; overflow-x: auto; }
 @media (max-width: 520px) { .adm-kv { grid-template-columns: 1fr; } .adm-kv dt { margin-top: 6px; } }
+
+/* ── Step trace: the pipeline's steps, in the conversation ─────────────────── */
+.step-trace { margin: 2px 0 12px; font-size: 12.5px; line-height: 1.5; color: var(--text-muted); font-style: italic; }
+.step-list { list-style: none; margin: 0; padding: 0 0 0 2px; display: flex; flex-direction: column; gap: 3px; }
+.step { display: flex; align-items: baseline; gap: 8px; animation: step-in 0.25s ease-out; }
+.step-mark { width: 12px; flex-shrink: 0; text-align: center; font-style: normal; font-size: 11px; color: var(--green, #22c55e); }
+.step--none .step-mark { color: var(--text-muted); }
+.step--warn .step-mark, .step--warn .step-text { color: var(--amber); }
+.step--run .step-mark::before {
+  content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  border: 1.5px solid var(--text-muted); border-top-color: transparent; animation: step-spin 0.8s linear infinite;
+}
+.step-text { min-width: 0; overflow-wrap: anywhere; }
+.step-ms { margin-left: auto; padding-left: 8px; font-style: normal; font-family: var(--font-mono); font-size: 10.5px; opacity: 0.8; flex-shrink: 0; }
+.step-toggle {
+  background: none; border: none; padding: 0; margin-bottom: 4px; cursor: pointer;
+  font: inherit; font-style: italic; color: var(--text-muted);
+}
+.step-toggle:hover { color: var(--text); }
+@keyframes step-in { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
+@keyframes step-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .step, .step--run .step-mark::before { animation: none; } }
+
+/* ── Pipeline panel optional (⚡ in the header) ───────────────────────────── */
+.app--solo { grid-template-columns: 1fr; }
+.app--solo .panel-left { border-right: none; }
+.app--solo .query-section > *, .app--solo .answer-section > * { max-width: 860px; margin-left: auto; margin-right: auto; }
+.header-icon-btn--on { border-color: var(--indigo); background: var(--indigo-glow); }
+
+/* ── Big screens: the layout is in px, so scale it up rather than leave a small island ── */
+/* `zoom` is standard CSS (all current browsers); 100vh rows are divided by it so the
+   panels still fill exactly one screen. */
+@media (min-width: 1800px) { .app { --z: 1.15; zoom: var(--z); grid-template-rows: calc(100vh / var(--z)); } }
+@media (min-width: 2400px) { .app { --z: 1.3; } }

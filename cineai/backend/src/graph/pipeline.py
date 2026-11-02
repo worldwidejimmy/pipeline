@@ -37,6 +37,7 @@ class CineState(TypedDict, total=False):
     question: str
     history: list[dict]        # [{"q": "...", "a": "..."}] — last 10 turns
     routing: str
+    routing_by: str            # "keyword" (deterministic rule) or "model" (LLM classifier)
     tmdb_result: str
     rag_result: str
     search_result: str

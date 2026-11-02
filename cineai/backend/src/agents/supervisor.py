@@ -103,7 +103,7 @@ async def supervisor_route_node(state: dict) -> dict:
     # Fast deterministic path — skip the LLM for obvious signals
     forced = _keyword_route(question)
     if forced:
-        return {"routing": forced}
+        return {"routing": forced, "routing_by": "keyword"}
 
     # Build history context for the prompt
     if history:
@@ -133,4 +133,4 @@ async def supervisor_route_node(state: dict) -> dict:
         tokens = re.findall(r"[a-z]+(?:\+[a-z]+)?", raw)
         routing = next((t for t in sorted(tokens, key=len, reverse=True) if t in valid), "tmdb+rag")
 
-    return {"routing": routing}
+    return {"routing": routing, "routing_by": "model"}

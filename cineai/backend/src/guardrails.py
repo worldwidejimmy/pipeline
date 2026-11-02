@@ -94,11 +94,26 @@ def link_allowed(url: str, extra: Iterable[str] = ()) -> bool:
     return any(host == d or host.endswith("." + d) for d in ALLOWED_DOMAINS)
 
 
-def filter_links(text: str, extra: Iterable[str] = ()) -> str:
-    """Unlink every link whose target isn't allowed: `[label](bad)` → `label`, bare bad URL → `[link removed]`."""
+def filter_links(text: str, extra: Iterable[str] = (), removed: list[str] | None = None) -> str:
+    """Unlink every link whose target isn't allowed: `[label](bad)` → `label`, bare bad URL → `[link removed]`.
+    Blocked targets are appended to `removed` when given (the UI shows the guardrail acting)."""
     extra = list(extra)
-    text = _MD_LINK.sub(lambda m: m.group(0) if link_allowed(m.group(2), extra) else m.group(1), text)
-    return _BARE_URL.sub(lambda m: m.group(0) if link_allowed(m.group(0), extra) else "[link removed]", text)
+
+    def md(m: re.Match) -> str:
+        if link_allowed(m.group(2), extra):
+            return m.group(0)
+        if removed is not None:
+            removed.append(m.group(2))
+        return m.group(1)
+
+    def bare(m: re.Match) -> str:
+        if link_allowed(m.group(0), extra):
+            return m.group(0)
+        if removed is not None:
+            removed.append(m.group(0))
+        return "[link removed]"
+
+    return _BARE_URL.sub(bare, _MD_LINK.sub(md, text))
 
 
 class LinkGuard:
@@ -115,6 +130,7 @@ class LinkGuard:
     def __init__(self, extra: list[str] | None = None):
         self.extra = extra if extra is not None else []   # by reference: search URLs may arrive later
         self.buf = ""
+        self.removed: list[str] = []                       # blocked link targets, for the UI
 
     def _cut(self) -> int:
         b, cut = self.buf, len(self.buf)
@@ -140,8 +156,8 @@ class LinkGuard:
         self.buf += chunk
         cut = self._cut()
         out, self.buf = self.buf[:cut], self.buf[cut:]
-        return filter_links(out, self.extra)
+        return filter_links(out, self.extra, self.removed)
 
     def flush(self) -> str:
         out, self.buf = self.buf, ""
-        return filter_links(out, self.extra)
+        return filter_links(out, self.extra, self.removed)

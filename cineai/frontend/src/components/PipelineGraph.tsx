@@ -11,10 +11,7 @@ interface Props {
 
 const ALL_NODES: AgentName[] = [
   'supervisor_route', 'tmdb_agent', 'rag_agent', 'search_agent', 'music_agent', 'synthesise',
-  'rag_answer', 'base_answer', 'judge'
 ]
-
-const COMPARE_NODES: AgentName[] = ['rag_answer', 'base_answer', 'judge']
 
 // Mirrors backend/src/graph/pipeline.py:_dispatch — keep in sync.
 const ROUTING_AGENTS: Record<RoutingDecision, AgentName[]> = {
@@ -50,9 +47,6 @@ export function PipelineGraph({ events }: Props) {
   }
 
   const activeWorkers = routing ? ROUTING_AGENTS[routing] : []
-  const compareMode = events.some(
-    e => e.type === 'agent_start' && COMPARE_NODES.includes(e.agent)
-  )
 
   const renderNode = (name: AgentName) => {
     const meta = AGENT_META[name]
@@ -85,28 +79,6 @@ export function PipelineGraph({ events }: Props) {
   }
 
   const allIdle = Object.values(nodeStates).every(s => s.status === 'idle')
-
-  if (compareMode) {
-    return (
-      <div className="pipeline-graph">
-        <div className="graph-nodes">
-          {renderNode('rag_agent')}
-
-          <div className="graph-connector">↓</div>
-          <div className="graph-routing-label">→ compare</div>
-
-          <div className="graph-fan">
-            {renderNode('rag_answer')}
-            {renderNode('base_answer')}
-          </div>
-
-          <div className="graph-connector">↓</div>
-
-          {renderNode('judge')}
-        </div>
-      </div>
-    )
-  }
 
   return (
     <div className="pipeline-graph">

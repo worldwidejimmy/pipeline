@@ -88,14 +88,18 @@ try {
 
 await page.screenshot({ path: SHOT('1-homepage') })
 
-// ── 4. Real search (full agent pipeline + SSE streaming) ─────────────────────
+// ── 4. Real search (full agent pipeline + SSE streaming, shown as chat steps) ──
 console.log(`\n[4] Live search — "${QUERY}" (costs 1 search + tokens)`)
 try {
   await page.fill('.query-input', QUERY)
   await page.click('.query-btn')
-  await page.waitForSelector('.obs-badge.live', { timeout: 15000 })
-  pass('SSE stream started (LIVE badge)')
-  await page.waitForSelector('.obs-badge.live', { state: 'detached', timeout: 120000 })
+  await page.waitForSelector('.step-trace .step', { timeout: 15000 })
+  pass('step trace started in the chat')
+  const q = await page.locator('.current-turn .history-q').innerText()
+  q.includes(QUERY) ? pass('question shown as a chat message') : fail('question bubble', q.slice(0, 80))
+  const cleared = await page.inputValue('.query-input')
+  cleared === '' ? pass('input cleared for a follow-up') : fail('input not cleared', cleared)
+  await page.waitForSelector('.history-turn .answer-content', { timeout: 120000 })
   const answer = await page.locator('.answer-content').last().innerText()
   answer.length > 300 ? pass('answer streamed', `${answer.length} chars`) : fail('answer too short', `${answer.length} chars: ${answer.slice(0, 80)}`)
   const relevant = /inception/i.test(answer)
@@ -104,53 +108,50 @@ try {
   grounded ? pass('answer is grounded (not a "couldn\'t find" fallback)') : fail('agent found nothing', answer.slice(0, 120))
   const answerBlocks = await page.locator('.answer-content').count()
   answerBlocks === 1 ? pass('answer rendered once') : fail('answer duplicated', `${answerBlocks} blocks`)
-  const events = await page.locator('.obs-event-count').innerText()
-  pass('pipeline events emitted', events || '(count hidden)')
+  const steps = await page.locator('.history-turn .step-text').allInnerTexts()
+  const want = [/Routing →/, /Combined \d+ sources? into one answer/]
+  want.every(r => steps.some(t => r.test(t)))
+    ? pass('steps kept in the history', steps.join(' | ').slice(0, 160))
+    : fail('step trace', steps.join(' | ').slice(0, 160))
+  const summary = await page.locator('.history-turn .step-toggle').innerText()
+  ;/\d+ sources? · [\d.]+s · [\d,]+ tokens · claude-/.test(summary)
+    ? pass('summary line with model', summary) : fail('summary line', summary)
   // 👍/👎 bar under the finished answer (not clicked: a vote would land in the real feedback log)
   const fbVisible = await page.locator('.fb-bar .fb-btn').first().isVisible().catch(() => false)
   fbVisible ? pass('feedback bar shown') : fail('feedback bar missing', 'no .fb-bar under the answer')
 } catch (e) { fail('search flow', String(e).slice(0, 200)) }
 await page.screenshot({ path: SHOT('2-search-result') })
 
-// ── 4b. Compare mode: RAG vs no-RAG + blind judge (opt-in: E2E_COMPARE=1) ────
-if (process.env.E2E_COMPARE === '1') {
-  console.log('\n[4b] Compare mode (costs 1 more search + ~3 LLM calls)')
-  try {
-    await page.click('.compare-toggle')
-    await page.fill('.query-input', "Christopher Nolan's directing style")
-    await page.click('.query-btn')
-    await page.waitForSelector('.obs-badge.live', { timeout: 15000 })
-    await page.waitForSelector('.obs-badge.live', { state: 'detached', timeout: 180000 })
-    const rag = await page.locator('.cmp-col').first().innerText()
-    const base = await page.locator('.cmp-col').nth(1).innerText()
-    rag.length > 200 && base.length > 200
-      ? pass('both sides answered', `rag ${rag.length} / base ${base.length} chars`)
-      : fail('compare sides', `rag ${rag.length} / base ${base.length} chars`)
-    const judge = await page.locator('.cmp-judge').innerText()
-    const verdict = /verdict/i.test(judge) && /reveal/i.test(judge)
-    verdict ? pass('blind judge verdict + reveal rendered') : fail('judge panel', judge.slice(0, 120))
-    const graph = await page.locator('.pipeline-graph').innerText()
-    // (an `if`, not a leading /regex/ — after a semicolon-less line that parses as division)
-    if (/Blind Judge/.test(graph)) pass('compare pipeline graph rendered')
-    else fail('compare graph', graph.slice(0, 120))
-    const metrics = await page.locator('.metrics-bar').innerText()
-    if (/3/.test(metrics)) pass('metrics show LLM calls', metrics.replace(/\n/g, ' ').slice(0, 80))
-    else fail('compare metrics', metrics.slice(0, 80))
-    await page.screenshot({ path: SHOT('5-compare') })
-    await page.click('.compare-toggle')          // back to normal mode
-    await page.click('text=+ New Search')
-    await page.waitForTimeout(500)
-  } catch (e) { fail('compare mode', String(e).slice(0, 200)) }
-}
-
-// ── 5. Observability tabs ────────────────────────────────────────────────────
-console.log('\n[5] Observability tabs')
+// ── 4b. Follow-up in the same conversation (costs 1 more search) ─────────────
+console.log('\n[4b] Follow-up question (chat memory)')
 try {
+  await page.fill('.query-input', 'Who composed its score?')
+  await page.click('.query-btn')
+  await page.waitForFunction(() => document.querySelectorAll('.history-turn').length === 2, null, { timeout: 120000 })
+  const a2 = await page.locator('.history-turn').last().locator('.answer-content').innerText()
+  ;/zimmer/i.test(a2) ? pass('follow-up resolved "its" from the previous turn', 'mentions Hans Zimmer')
+    : fail('follow-up', a2.slice(0, 120))
+  const folded = await page.locator('.history-turn').first().locator('.step-list').count()
+  folded === 0 ? pass('older turn folded to its summary line') : fail('older turn not folded', `${folded}`)
+} catch (e) { fail('follow-up flow', String(e).slice(0, 200)) }
+await page.screenshot({ path: SHOT('3-follow-up') })
+
+// ── 5. Pipeline panel (optional, ⚡) + observability tabs ─────────────────────
+console.log('\n[5] Pipeline panel + observability tabs')
+try {
+  const hidden = await page.locator('.panel-right').count()
+  hidden === 0 ? pass('pipeline panel hidden by default') : fail('pipeline panel', 'shown by default')
+  await page.click('[aria-label="AI pipeline panel"]')
+  await page.waitForSelector('.panel-right', { timeout: 5000 })
+  const badge = await page.locator('.obs-badge').innerText()
+  const events = await page.locator('.obs-event-count').innerText()
+  badge === 'COMPLETE' ? pass('panel opens with the last run', `${badge}, ${events}`) : fail('panel badge', badge)
   for (const sel of ['text=⏱ Timeline', 'text=📋 Events', 'text=📄 Context', 'text=🗺 Graph']) {
     await page.click(sel)
     await page.waitForTimeout(250)
   }
   pass('tabs clickable (graph/timeline/events/context)')
+  await page.click('[aria-label="AI pipeline panel"]')       // leave the default for the next visitor's localStorage
 } catch (e) { fail('observability tabs', String(e).slice(0, 150)) }
 
 // ── 6. Usage accounting after search ─────────────────────────────────────────

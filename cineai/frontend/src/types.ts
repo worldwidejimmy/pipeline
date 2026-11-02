@@ -7,10 +7,7 @@ export type AgentName =
   | 'search_agent'
   | 'music_agent'
   | 'synthesise'
-  // compare-mode pseudo-agents (RAG vs no-RAG demo)
-  | 'rag_answer'
-  | 'base_answer'
-  | 'judge';
+  | 'kb_lookup';      // knowledge-base-first retrieval, before routing
 
 // Must stay in sync with the _dispatch mapping in backend/src/graph/pipeline.py.
 export type RoutingDecision =
@@ -41,6 +38,7 @@ export interface RoutingDecisionEvent {
   type: 'routing_decision';
   routing: RoutingDecision;
   agent: AgentName;
+  by?: 'keyword' | 'model';   // deterministic keyword rule, or the LLM classifier
   ts: number;
 }
 
@@ -89,12 +87,47 @@ export interface TmdbResultsEvent {
   ts: number;
 }
 
+export interface KbLookupEvent {
+  type: 'kb_lookup';
+  relevant: boolean;          // passed the calibrated relevance gate
+  relevant_count: number;
+  best_score: number;         // dense similarity of the best passage
+  threshold: number;
+  chunks: RagChunk[];         // the relevant passages (empty when none)
+  latency_ms: number;
+  ts: number;
+}
+
+export interface SearchResultsEvent {
+  type: 'search_results';
+  count: number;
+  domains: string[];
+  ts: number;
+}
+
+export interface MusicResultsEvent {
+  type: 'music_results';
+  artist: string | null;
+  albums: unknown[];
+  genres: string[];
+  ts: number;
+}
+
+export interface GuardrailEvent {
+  type: 'guardrail';
+  kind: 'link_removed';
+  count: number;
+  domains: string[];
+  ts: number;
+}
+
 export interface DoneEvent {
   type: 'done';
   total_latency_ms: number;
   total_prompt_tokens: number;
   total_completion_tokens: number;
   agents_used: AgentName[];
+  model?: string;
   ts: number;
 }
 
@@ -114,6 +147,10 @@ export type PipelineEvent =
   | LlmEndEvent
   | ChunksRetrievedEvent
   | TmdbResultsEvent
+  | KbLookupEvent
+  | SearchResultsEvent
+  | MusicResultsEvent
+  | GuardrailEvent
   | DoneEvent
   | ErrorEvent;
 
@@ -151,15 +188,6 @@ export interface AdminUsage {
   blacklist: string[];
 }
 
-// ── RAG-vs-no-RAG compare ─────────────────────────────────────────────────────
-
-export type CompareSide = 'rag' | 'base';
-
-export interface CompareTokens {
-  prompt_tokens: number;
-  completion_tokens: number;
-}
-
 // ── TMDB types ────────────────────────────────────────────────────────────────
 
 export interface TmdbMovie {
@@ -183,7 +211,5 @@ export const AGENT_META: Record<AgentName, { label: string; color: string; icon:
   search_agent:     { label: 'Web Search',   color: '#f97316', icon: '🌐' },
   music_agent:      { label: 'Music Agent',  color: '#ec4899', icon: '🎵' },
   synthesise:       { label: 'Synthesiser',  color: '#eab308', icon: '✨' },
-  rag_answer:       { label: 'With RAG',     color: '#3b82f6', icon: '🔍' },
-  base_answer:      { label: 'Without RAG',  color: '#a855f7', icon: '🧠' },
-  judge:            { label: 'Blind Judge',  color: '#eab308', icon: '⚖️' },
+  kb_lookup:        { label: 'KB lookup',    color: '#60a5fa', icon: '📚' },
 };

@@ -89,3 +89,12 @@ def test_linkguard_sees_search_urls_added_later():
     g = LinkGuard(urls)
     urls.append("https://variety.com/a")              # the search agent finished after the guard was made
     assert g.feed("[V](https://variety.com/a) ") == "[V](https://variety.com/a) "
+
+
+def test_removed_links_are_reported_for_the_ui():
+    removed: list[str] = []
+    filter_links(f"[ok]({TMDB}) [bad]({EVIL}) and {EVIL}", removed=removed)
+    assert removed == [EVIL, EVIL]
+    g = LinkGuard()
+    "".join(g.feed(ch) for ch in f"[x]({EVIL}) [y]({TMDB})") + g.flush()
+    assert g.removed == [EVIL]

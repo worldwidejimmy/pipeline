@@ -107,6 +107,9 @@ _AGENT_NODES = {
 }
 
 
+_domain = guardrails._domain          # bare host of a URL, for the UI's step trace
+
+
 def _sse(event_type: str, payload: dict) -> str:
     payload["ts"] = int(time.time() * 1000)
     return f"event: {event_type}\ndata: {json.dumps(payload)}\n\n"
@@ -188,7 +191,8 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
                 if ename == "supervisor_route":
                     routing = output.get("routing", "tmdb")
                     payload["routing"] = routing
-                    yield _sse("routing_decision", {"routing": routing, "agent": ename})
+                    yield _sse("routing_decision", {"routing": routing, "agent": ename,
+                                                    "by": output.get("routing_by", "model")})
 
                 if ename == "rag_agent":
                     chunks = output.get("_rag_chunks", [])
@@ -210,7 +214,12 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
                         })
 
                 if ename == "search_agent":
-                    search_urls.extend(r["url"] for r in output.get("_search_results", []) if r.get("url"))
+                    found = [r for r in output.get("_search_results", []) if r.get("url")]
+                    search_urls.extend(r["url"] for r in found)
+                    yield _sse("search_results", {
+                        "count":   len(found),
+                        "domains": list(dict.fromkeys(_domain(r["url"]) for r in found))[:5],
+                    })
 
                 if ename == "music_agent":
                     raw = output.get("_music_raw", {})
@@ -256,6 +265,10 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
                     if synthesis_streaming:
                         final_parts.append(rest)
                     yield _sse("token", {"content": rest, "agent": current_agent, "is_final": synthesis_streaming})
+                if guard and guard.removed and synthesis_streaming:
+                    # Shown in the chat's step trace: the output guardrail acting, visibly.
+                    yield _sse("guardrail", {"kind": "link_removed", "count": len(guard.removed),
+                                             "domains": list(dict.fromkeys(map(_domain, guard.removed)))[:3]})
                 output = data.get("output")
                 # usage_metadata is a TypedDict (dict at runtime) on modern
                 # langchain-core — use dict access, not getattr (which silently
@@ -331,10 +344,11 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
 
     usage.add_tokens(total_prompt_tokens, total_completion_tokens, ip=client_ip)
     total_ms = int(time.time() * 1000) - start_ms
+    from src.llm import model_id
+    model = model_id()
     if final_parts:
-        from src.llm import model_id
         feedback.remember(run_id, question=question, answer="".join(final_parts), route=routing,
-                          model=model_id(), traced=traced_id is not None)
+                          model=model, traced=traced_id is not None)
     yield _sse("done", {
         "run_id":                  run_id,
         "total_latency_ms":        total_ms,
@@ -343,6 +357,7 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
         "cache_read_tokens":       cache_read_tokens,
         "cache_write_tokens":      cache_write_tokens,
         "agents_used":             list(dict.fromkeys(agents_used)),
+        "model":                   model,          # shown under the answer (public: it's in the code)
     })
 
 
