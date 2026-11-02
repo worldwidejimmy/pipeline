@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import jwt
-from mcp.server.auth.provider import AccessToken
+from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
@@ -295,7 +295,7 @@ async def get_artist(name: str = Field(min_length=1, max_length=120, description
 
 
 # ── OAuth 2.1 resource server: JWT verification ───────────────────────────────
-class JWTVerifier:
+class JWTVerifier(TokenVerifier):
     """Validates bearer JWTs from an external authorization server.
 
     Accepts only asymmetric algorithms (an `alg: none`/HS256 token can't be forged with a
