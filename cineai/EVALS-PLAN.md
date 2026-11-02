@@ -139,12 +139,9 @@ case). The relevance gate's own thresholds were calibrated as an experiment
 (MRR 0.79), t4 8/8, t5 about $0.0010–0.0011 per question (was $0.0008), t6 6/6, t7 14/14.
 
 ## Next
-- **"RAG value" eval.** The UI's compare toggle was removed (Claude already knows famous films,
-  so no-RAG always looked as good). Measure instead, e.g. with the existing blind-judge compare
-  code (`compare.py`), whether knowledge-base grounding improves answers, especially for
-  reviews newer than the model's training data.
-- **Is the RAG agent's summary call redundant?** Test letting the combiner read the passages
-  directly.
+
+Open eval work (the "RAG value" eval, the RAG-summary experiment, `TOP_K`, query expansion) is
+tracked in **[../TODO.md](../TODO.md)**.
 
 ## Open questions — resolved
 - *Where do results live?* `evals/results/` (bind-mounted, gitignored): JSONL history per tier

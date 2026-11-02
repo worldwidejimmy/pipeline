@@ -171,9 +171,9 @@ metadata), so parallel agents' tokens no longer get mixed up.
 
 ### Prerequisites
 
-- Pipeline project's Milvus stack running: `cd /home/user/pipeline && docker-compose up -d`
+- Docker with Compose (the stack includes Milvus, etcd and MinIO; nothing else to install)
 - API keys (TMDB/Tavily have free tiers; Anthropic is paid):
-  - [Anthropic](https://console.anthropic.com) — LLM inference (paid; haiku is the cheap default)
+  - [Anthropic](https://console.anthropic.com) — LLM inference (paid; Haiku is the cheap default)
   - [TMDB](https://www.themoviedb.org/settings/api) — movie data (use "API Read Access Token")
   - [OpenAI](https://platform.openai.com) — embeddings only (tiny cost)
   - [Tavily](https://tavily.com) — optional web search
@@ -181,31 +181,25 @@ metadata), so parallel agents' tokens no longer get mixed up.
 ### Setup
 
 ```bash
-cd /home/user/cineai
+git clone https://github.com/worldwidejimmy/pipeline.git
+cd pipeline/cineai
 
-# Configure API keys
+# Configure API keys (keep the file private: chmod 600)
 cp backend/.env.example backend/.env
 nano backend/.env   # fill in ANTHROPIC_API_KEY, TMDB_BEARER_TOKEN, OPENAI_API_KEY
 
-# Install and start everything
-./start.sh
+# Start everything (Milvus + backend + frontend)
+make up             # = docker compose up -d
 ```
 
 Open **http://localhost:5174**
 
-### Ingest movie knowledge base (optional, for RAG)
+### Ingest the knowledge base (for RAG)
 
-Drop `.txt`, `.md`, or `.pdf` movie review/analysis files into `docs/`, then:
-
-```bash
-cd /home/user/cineai/backend
-.venv/bin/python scripts/ingest.py docs/
-```
-
-Or point it at the pipeline project's corpus to reuse those docs:
+The curated Markdown guides live in `backend/docs/` (mounted into the backend container):
 
 ```bash
-.venv/bin/python scripts/ingest.py /home/user/pipeline/docs/
+make ingest         # chunks, embeds and loads backend/docs/ into Milvus
 ```
 
 **Roger Ebert reviews** (optional, same Milvus collection): scrape to `backend/data/` then `python scripts/ingest_ebert.py` — see [../HANDOFF.md](../HANDOFF.md).
@@ -272,17 +266,12 @@ routing decision · agents used.
 
 - [x] Multi-turn conversation (LangGraph `MemorySaver`) with follow-up rewriting
 - [x] Knowledge base first, with a calibrated relevance gate
-- [ ] "RAG value" eval to replace the removed compare toggle (does grounding improve answers, esp. for reviews newer than the model?)
-- [ ] Test whether the RAG agent's summary call is redundant (combiner reads passages directly)
-- [ ] Streaming tokens shown in real-time in Events tab
-- [ ] "Why this recommendation?" — explainability mode
-- [ ] Watchlist with persistent storage (PostgreSQL)
-- [ ] RAGAS evaluation on recommendation quality
-- [ ] Ingest IMDb TSV datasets for richer RAG corpus
-- [ ] Semantic caching with Redis for repeated queries
 - [x] Hybrid search (BM25 + dense) in Milvus
 - [x] Music agent (MusicBrainz) and music routing
 - [x] Rules modal (`/api/rules`) and keyword overrides in supervisor
+- [x] Automated evals (seven tiers, nightly) and the MCP server
+
+Open work: **[../TODO.md](../TODO.md)**.
 
 ---
 

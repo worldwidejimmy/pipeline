@@ -47,9 +47,12 @@ allow-list was retired (2026-06-27).
   `*.bak-secaudit`, `*.bak-cflock`, `*.bak-aop`, `*.bak-enforce`.
 - **This box needs `systemctl reload nginx` run twice** for config to fully apply.
 
-## TODO — owner: **user**
-- **SEC-3 — Anthropic billing guardrails:** console.anthropic.com → set a monthly spend
-  limit + usage alerts. (In-app `DAILY_TOKEN_HARD_CAP` + the 30/day call cap already help.)
-- **Optional hardening:** upgrade Cloudflare SSL from **Flexible → Full (Strict)** (serve the
-  vhost on 443 with an origin cert) and add **Authenticated Origin Pulls** (mTLS) — removes
-  the IP-list maintenance and encrypts CF↔origin. Also consider Cloudflare **Bot Fight Mode**.
+## Owner items
+
+Open: **SEC-3**, set a monthly spend limit and usage alerts in the Anthropic console (the in-app
+`DAILY_TOKEN_HARD_CAP` and the 30/day call cap already help). Tracked in
+**[../TODO.md](../TODO.md)**, with optional Bot Fight Mode.
+
+Done (verified 2026-11-02): the origin serves HTTPS on 443 with a Cloudflare origin certificate
+and enforces **Authenticated Origin Pulls** (mTLS: only Cloudflare can connect; a direct request
+is refused), plain HTTP redirects to HTTPS, and 80/443 are firewalled to Cloudflare's ranges.

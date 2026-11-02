@@ -291,7 +291,10 @@ sudo nginx -t && sudo systemctl reload nginx
 ```
 
 ### Cloudflare settings (smartmoviesearch.com zone)
-- **SSL/TLS mode:** Flexible — Cloudflare terminates SSL; proxies HTTP to nginx port 80
+- **SSL/TLS mode:** Full (Strict) with **Authenticated Origin Pulls** (since 2026-06-27): Cloudflare
+  connects to nginx on 443 (Cloudflare origin certificate) and must present its client
+  certificate (`ssl_verify_client on`); a direct request to the origin is refused, and port 80
+  redirects to HTTPS. See `SECURITY-AUDIT.md` SEC-1. (The checked-in `nginx.conf` predates this.)
 - **DNS:** A record → your VPS IP, orange cloud (proxied) ✓
 - **Minimum TLS:** 1.2
 - **Cache:** Disable caching for `/api/*` paths (Page Rule or Cache Rule)
@@ -384,7 +387,7 @@ make ingest          # auto-detects old schema, drops + recreates, re-embeds
 docker compose exec backend python scripts/ingest.py docs/ --reset
 ```
 
-## Known Gaps / Roadmap (in priority order)
+## Known Gaps / Roadmap
 
 - [x] ~~**Hybrid search** — Milvus sparse (BM25) + dense.~~ **Done.**
 - [x] ~~**Streaming answers not appearing** — LangChain 1.2 event API (`on_chat_model_*`).~~ **Fixed.**
@@ -393,14 +396,10 @@ docker compose exec backend python scripts/ingest.py docs/ --reset
 - [x] ~~**Supervisor routing ambiguous queries.**~~ **Fixed.** Trending clicks always resolve to TMDB.
 - [x] ~~**Knowledge base modal.**~~ **Done.**
 - [x] ~~**Whitepaper HTML page.**~~ **Done.**
-- [ ] **Streaming tokens in Event Log** — tokens currently only go to answer panel. Add a "Token Stream" sub-view to Event Log tab.
-- [ ] **"RAG value" eval** — replaces the removed compare toggle: measure (e.g. with the existing blind-judge compare code in `compare.py`) whether knowledge-base grounding improves answers, especially for reviews newer than the model's training data.
-- [ ] **RAG agent summary call** — test whether it's redundant (the combiner could read the passages directly).
-- [ ] **Redis semantic cache** — repeated queries hit the Anthropic API every time. `langchain.cache.RedisSemanticCache` with cosine threshold 0.95.
-- [ ] **Watchlist** — PostgreSQL-backed. User saves movies to a named list. Frontend `/watchlist` route.
-- [ ] **IMDb dataset ingest** — `datasets.imdbws.com` has free TSV files (title.basics, title.ratings, title.principals). Ingesting ratings for 10M+ titles would make RAG much richer.
-- [ ] **"Why this recommendation?"** — add an explain mode that shows which sources contributed which facts.
-- [ ] **Production Dockerfile** — backend and frontend currently rely on host Python/Node. Add multi-stage Dockerfile for proper containerisation.
+- [x] ~~**Follow-ups searched for "its"; RAG ran blind.**~~ **Fixed:** query rewriting + knowledge base first (see below).
+
+Open work, in one list: **[../TODO.md](../TODO.md)**.
+
 
 ---
 

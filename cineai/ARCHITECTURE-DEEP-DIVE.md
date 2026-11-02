@@ -33,7 +33,9 @@ stream, which means the backend must translate LangGraph's `astream_events` fire
 typed SSE contract while several agents emit interleaved LLM tokens concurrently. (c) **Running a
 paid LLM on an open endpoint** — no login, so the entire defence against financial DoS is layered
 quotas, a global daily call cap, a token hard-cap kill-switch, and origin lock-down via Cloudflare
-mTLS. Retrieval quality, by contrast, is the *least* solved part of the system (see §10).
+mTLS. Retrieval quality, by contrast, is the *least* tuned part of the system: it is now measured
+nightly (T2: hit@k 33/34, MRR 0.79 on a 34-case set), but most index and fusion parameters are
+still defaults (see §5, §10).
 
 ---
 
@@ -215,7 +217,9 @@ The graph is a **DAG with no cycles**: `START → understand → kb_lookup → s
 
 1. **Deterministic keyword override** (`supervisor.py:86`) — wins unconditionally, skips the LLM.
    This exists because a 16-token classification from a small fast model mis-routed "who wrote the
-   lyrics to Roxanne" to `tmdb`.
+   lyrics to Roxanne" to `tmdb`. The whole routing stack is now measured: eval tier T1 runs 48
+   labelled questions through the real supervisor nightly (latest 48/48; gated in
+   `evals/baseline.json` with a ~3-case tolerance because newer models can't run at temperature 0).
 2. **History-aware LLM classification** — last 3 turns, each answer truncated to 150 chars, folded
    into the system prompt so follow-ups ("what about his other films?") stay coherent.
 3. **Tolerant parsing** (`supervisor.py:124-132`) — exact match against a 10-member `valid` set;
@@ -285,8 +289,11 @@ synthesiser, but unbounded in *number of threads*). `DELETE /api/history` works 
 
 Note the recurring pattern: *empty upstream data never reaches the LLM.* That's the primary
 anti-hallucination control, reinforced by the synthesiser's CRITICAL instruction not to fill gaps
-from memory when an agent reports "couldn't find". **There are no retries anywhere** — not on
-Anthropic calls, not on TMDB, not on Milvus. A single 429 or transient 500 ends the request.
+from memory when an agent reports "couldn't find". **Retries are thin and implicit.** Anthropic
+calls get only the SDK default (`ChatAnthropic` `max_retries=2`, with the SDK's backoff on
+429/5xx); the MusicBrainz client spaces requests at 1/s and retries 503/429. TMDB, Tavily and
+Milvus get no retries, and there is no circuit breaker: a persistent 429 or a TMDB/Milvus error
+still ends the request.
 
 **Loop/recursion limits:** none configured. The graph is acyclic and at most 5 supersteps deep, so
 LangGraph's default `recursion_limit` (25) is never approached. Correct answer in an interview:
@@ -374,8 +381,8 @@ Points to be able to defend:
 - **IVF_FLAT, not HNSW.** `nlist=128`, searched with `nprobe=10` — i.e. ~8% of clusters probed.
   IVF_FLAT keeps full-precision vectors (no quantisation loss) and builds fast; HNSW would give
   better latency/recall at this scale but costs more memory and build time. At the current corpus
-  size this is not the bottleneck. Be honest that the params are defaults, not tuned against a recall
-  measurement.
+  size this is not the bottleneck. Be honest that the params are defaults: retrieval recall *is*
+  measured now (T2, below), but `nlist`/`nprobe` have never been swept against it.
 - **Metric `IP` (inner product).** OpenAI embeddings are L2-normalised, so IP is equivalent to cosine
   similarity — a common interview follow-up.
 - **BM25 k1=1.2, b=0.75** — the standard Robertson/Sparck-Jones defaults; untuned.
@@ -405,7 +412,17 @@ always outranks one that dominates a single list. That's the intended behaviour.
 
 `top_k` defaults to **6** (`config.py:30`, now read from the `TOP_K` env var). Note this is a
 single global k — there is no per-route or per-query-type k, so a broad "compare these five
-directors" question retrieves the same six chunks as a narrow factual lookup.
+directors" question retrieves the same six chunks as a narrow factual lookup. Measured: the
+hybrid retriever finds the same documents at top-4 as at top-6 on the T2 set (`--k 4`), so `TOP_K=4`
+would cut RAG context ~33%; it isn't switched until an answer-completeness (T3) check confirms it.
+
+**How retrieval is measured.** Eval tier T2 (`evals/run_evals.py`, no LLM, free) runs 34 labelled
+cases, 14 of them held out (written before the reranker experiment, never used for tuning), and
+reports hit@k, MRR, held-out MRR and content coverage. Latest: hit@k 33/34, MRR 0.79, held-out MRR
+0.73, content coverage 100%. The one miss, `wes-anderson-look`, is a nameless description
+("symmetrical pastel production design…") that Ebert reviews outrank. The run is gated on
+`evals/baseline.json`, and bumping the baseline is a deliberate, reviewed commit: the chunking
+change recorded there traded MRR 0.883 → 0.825 for content coverage 84% → 100%.
 
 The retrieved chunks are joined into one context block with `[Source: {source}]` headers and
 `\n\n---\n\n` separators (`milvus_retriever.py:112`), then dropped into the RAG agent's system prompt.
@@ -421,8 +438,17 @@ RPC issued on *every single query* with no caching, unlike the client and embedd
 
 ### Honest failure modes
 
-- **No reranker.** No cross-encoder, no Cohere/Voyage rerank stage. Top-6 RRF results go straight
-  into the prompt. This is the single highest-leverage retrieval improvement available.
+- **No reranker, by measurement.** Top-6 RRF results go straight into the prompt. A cross-encoder
+  was tried (`evals/experiments/rerank_experiment.py`, FlashRank ONNX models on CPU): fusing
+  MiniLM-L-12's order with the hybrid order reached MRR 0.942 on the 20 tuning cases, but on the
+  14 held-out cases it moved MRR only 0.720 → 0.768 and found **no additional documents** at any k,
+  for ~190 ms of CPU per RAG question. Not shipped; the write-up is in
+  `evals/experiments/README.md`. The real misses are query-understanding problems, not ranking ones.
+- **Relevance is gated, not assumed.** RRF scores are rank-only, so they can't say "nothing here".
+  `kb_gate.py` gates on the best dense cosine instead (≥ 0.60 relevant, < 0.45 nothing useful, a
+  Haiku grader in between), with thresholds tuned on a 68-question labelled set and checked on a
+  held-out split (0 false "relevant"). Shipped; see `evals/experiments/README.md`. The thresholds
+  belong to this embedder and corpus, so they must be re-run if either changes.
 - **No metadata filtering at query time.** The retriever never passes a Milvus `filter=` expression.
   "What did Ebert say about X" cannot restrict to `source like "ebert/%"`; it relies on BM25 matching
   the word "Ebert" that happens to be in the synthesised review header. Filtering exists only in
@@ -433,7 +459,7 @@ RPC issued on *every single query* with no caching, unlike the client and embedd
 - **Follow-ups are rewritten; no HyDE / multi-query.** Since 2026-11-02 the `understand` node
   rewrites a follow-up into a standalone question before retrieval (it used to embed "its score"
   verbatim). A standalone question is still embedded as-is, so nameless descriptive queries remain
-  weak.
+  weak; T2's one standing miss (`wes-anderson-look`) is exactly this case.
 - **No dedup at retrieval time.** Overlapping chunks from the same document can occupy several of
   the 6 slots.
 - **Insert-only, no upsert.** `auto_id=True` with plain `client.insert`; re-running `ingest.py`
@@ -451,15 +477,20 @@ RPC issued on *every single query* with no caching, unlike the client and embedd
 ### Model routing — what it actually is
 
 ```python
-# src/llm.py:20-24
-MODELS = {"haiku":  "claude-haiku-4-5",
-          "sonnet": "claude-sonnet-4-6",
-          "opus":   "claude-opus-4-8"}
+# src/llm.py
+FAMILIES = {"haiku": "claude-haiku-", "sonnet": "claude-sonnet-", "opus": "claude-opus-"}
+FALLBACK = {"haiku": "claude-haiku-5-5", "sonnet": "claude-sonnet-5-5", "opus": "claude-opus-5-5"}
 ```
 
-**There is no per-node model routing.** A single server-wide tier (`DEFAULT_MODEL_TIER`, default
-`haiku`) selects the model for *every* call — supervisor, agents, synthesiser, judge. What varies
-per node is `temperature`, `max_tokens`, and `streaming`:
+`DEFAULT_MODEL_TIER` is a **cost tier**, not a model id: `resolve()` asks the Models API for the
+newest model in that family at startup (re-checked every 24 h), falls back to `FALLBACK` if the API
+is unreachable, and `MODEL_PIN` overrides both. Every eval result records the resolved model id, so
+the nightly evals are what notice if an automatic move to a new model hurt quality.
+
+**There is no per-node model routing.** That single server-wide tier (default `haiku`) selects the
+model for *every* app call — supervisor, agents, synthesiser, KB grader. (The T3 eval judge is the
+exception: it deliberately runs a stronger tier than the generator.) What varies per node is the
+requested `temperature`, `max_tokens`, and `streaming`:
 
 | Node | temperature | max_tokens | streaming | Source |
 |---|---|---|---|---|
@@ -473,10 +504,15 @@ per node is `temperature`, `max_tokens`, and `streaming`:
 | `synthesise` | 0.2 | 1200 | yes | `synthesiser.py:43` |
 | compare sides / judge | 0.1 | 900 / 400 | yes | `compare.py:70,185` |
 
-One genuinely non-obvious detail worth mentioning unprompted: **`get_chat` omits `temperature`
-entirely for the opus tier** because Opus 4.8/4.7 reject sampling parameters with a 400
-(`llm.py:48`). That's the kind of provider-specific sharp edge that signals you actually shipped
-against the API.
+One genuinely non-obvious detail worth mentioning unprompted: **request parameters are derived
+from the model's advertised capabilities, not its id** (`llm.request_params`). Newer model
+generations reject non-default sampling parameters with a 400 and think by default, which would
+spend a 16-token router budget on thinking. So `get_chat` sends `temperature` only to models on the
+legacy surface, disables thinking wherever the model allows it, and gives always-thinking models
+`effort=low` plus extra `max_tokens` headroom. The temperatures in the table above are therefore
+*requested*, and on the current default model they are not sent at all. That's the kind of
+provider-specific sharp edge that signals you actually shipped against the API, and it is
+unit-tested (`tests/test_model_resolution.py`).
 
 `max_tokens=16` on the router is a deliberate cost/latency control — the router is called on
 essentially every request and its entire output is one token like `"tmdb+rag"`.
@@ -516,7 +552,10 @@ degraded default. Call sites still catch, but now they `print` the offending rep
 (`tmdb_agent.py:119`, `music_agent.py:80`) so a regression surfaces in `docker compose logs backend`.
 The lesson to articulate: *silent fallbacks in LLM plumbing are worse than crashes, because a
 degraded answer looks like a working system.* The project rule ("never bare `json.loads` on LLM
-output") is codified in `CLAUDE.md`.
+output") is codified in `CLAUDE.md`, and it is pinned by `tests/test_llm_contracts.py`, which
+replays captured-style Claude replies (`evals/fixtures/llm_outputs.jsonl`) against the real
+`parse_llm_json`, plus the router's string normalisation (a replica, with a test that fails if it
+drifts from `supervisor.py`).
 
 ### Prompt structure
 
@@ -528,18 +567,31 @@ block ("media_type 'tv' means it is a TV series, NOT a movie"), and link-format 
 force TMDB/MusicBrainz URLs to be built from returned `id` fields. The synthesiser adds
 `PRESERVE all markdown links` so it doesn't strip the citations its sub-agents produced.
 
+Prompts are split for caching: `llm.system_blocks(static, dynamic)` puts the fixed instructions in
+a cached block and per-request data after it (T5 reports a ~43% cache-hit rate on input tokens).
+Third-party data (TMDB, MusicBrainz, web results, KB passages) never goes in raw: it passes through
+`guardrails.clean()` (strips tags and hidden Unicode) and is wrapped in `<untrusted_data>` tags by
+`wrap_untrusted()`, with a fixed rule in the system prompt explaining what those tags mean
+(spotlighting). On the way out, the answer stream passes through `LinkGuard`, a deterministic
+allow-list that unlinks any URL whose domain isn't a known source or an actual web-search result.
+
 Raw API payloads are truncated before interpolation — `tmdb_text[:6000]` (or 9000 for
 `title_and_person`), `music_text[:6000]`, `formatted[:5000]` for Tavily — a crude but effective
 prompt-budget control.
 
 ### Token and cost characteristics
 
-Per `llm.py:8`: haiku $1/$5 per 1M in/out, sonnet $3/$15, opus $5/$25. Call counts per route:
+Per-model prices live in the eval harness (`evals/run_evals.py` `PRICES`, $/MTok in/out, with
+Anthropic's cache-write/read multipliers). Call counts per route:
 `tmdb` = 3 (router + extract + answer), `rag` = 3, `music` = 4, `all` = 8. Actual token totals are
 measured per request from `usage_metadata` and reported in the `done` event and in
 `/api/usage` / `/api/admin/usage`, aggregated per-day and per-IP in memory (`usage.py:132`).
-**There is no cost dashboard, no historical token series, and no per-route cost breakdown** — the
-counters reset on restart and on UTC midnight.
+**Cost is measured, but on a fixed set, not on live traffic.** Eval tier T5 replays the 8 T4
+canaries nightly and records p50/p95 latency, tokens per question, cache-hit rate and $/question
+(latest: p50 6.3 s, p95 16.1 s, ~8.7k tokens, ~$0.0011 per question on the default Haiku model),
+gated at a >2× jump over baseline and charted on `/admin` and the 🧪 Evals & ops modal. The
+*live* counters still reset on restart and at UTC midnight, and there is no per-route cost
+breakdown of real traffic.
 
 ### Streaming
 
@@ -557,9 +609,11 @@ without the retrieved context **concurrently** (two `asyncio` tasks multiplexed 
 `asyncio.Queue` with a `None` sentinel per side), then makes a third call — a blind judge that
 receives both answers in random A/B order (`random.choice`) and is explicitly *not* told which used
 retrieval. The mapping is revealed to the UI only after the verdict. It emits both its own
-`compare_*` events and the standard pipeline events so the observability panel keeps working. This
-is the closest thing the project has to an eval — but it's a **single-sample, LLM-judged, non-recorded
-demo**, not a measurement (see §10). The UI toggle was removed on 2026-11-02 (Claude already knows
+`compare_*` events and the standard pipeline events so the observability panel keeps working. On
+its own it's a **single-sample, LLM-judged, non-recorded demo**, not a measurement; the real
+measurement now lives in the eval tiers (§7 → Evals). T3's answer-quality judge is the
+grown-up version: a stronger model than the generator, and fixed calibration answers with known
+verdicts that check the judge itself (if it gets those wrong, its scores are ignored). The UI toggle was removed on 2026-11-02 (Claude already knows
 famous films, so it always looked bad); the endpoint stays for a planned "RAG value" eval.
 
 ---
@@ -573,6 +627,9 @@ famous films, so it always looked bad); the endpoint stays for a planned "RAG va
 | `GET /api/query?q&thread_id` | quota-gated | SSE pipeline stream |
 | `GET /api/compare?q` | quota-gated | SSE RAG-vs-no-RAG + blind judge; costs 1 credit for ~3 calls (no longer in the UI) |
 | `GET /api/ops/overview` | public | allow-listed scheduled jobs + ingest/embedding history (`src/ops.py`) |
+| `GET /api/evals/summary`, `GET /api/evals/badge` | public | latest eval headline per tier (the 🧪 Evals & ops modal) |
+| `POST /api/feedback` | public, rate-limited | 👍/👎 on an answer, by answer id only (`src/feedback.py`) |
+| `GET /api/admin/evals`, `/admin/model`, `/admin/mcp`, `/admin/feedback`, `/admin/tracing` | **admin token** | eval history, resolved model, MCP, feedback, tracing status |
 | `GET /api/usage` | public | quota + daily token snapshot |
 | `GET /api/status` | public | Milvus / Anthropic / TMDB liveness + key-presence booleans |
 | `GET /api/knowledge` | public | corpus summary via Milvus `count(*)` + `query_iterator` |
@@ -639,11 +696,42 @@ older port-80 / CF-Flexible arrangement — treat it as reference, not truth.
   `MemAvailable`, reclaimable Docker space, backup freshness (>36 h = issue), **origin-cert expiry
   (<30 days = issue)**, and last nightly-ingest result. Writes a per-run report plus an append-only
   `devops-history.jsonl`, keeps the last 60, emails red/green.
-- **Tests:** `make test-unit` → pytest over `src/usage.py` (quotas, caps, blacklist, lockout — 268
-  lines, no Docker or API keys needed). `make test-e2e` → Playwright/Chromium against the running
-  stack: homepage, trending cards, a real SSE search (costs a credit and real tokens), usage
-  accounting, modals, theme, and a dedicated case asserting the anti-bot guard rejects headless UAs.
-  **There are zero tests for the graph, the agents, the router, or retrieval.**
+- **Tests:** `make test-unit` → 190 pytest cases in `backend/tests/` (no Docker or API keys
+  needed): quotas/caps/blacklist/lockout (`usage.py`), guardrails (including a property test that
+  `LinkGuard` gives the same output for any chunking of the stream), the KB gate's bands and
+  fan-out adjustment, the MCP server (JWT verifier, tool snapshot), tracing redaction, feedback,
+  ops log parsing, the eval harness itself, LLM-output contracts (`parse_llm_json`), model
+  resolution and request params. `make test-e2e` → a 30-check Playwright/Chromium suite
+  (`tests/e2e.mjs`) against the running stack: homepage, trending cards, a real SSE search (costs a
+  credit and real tokens), usage accounting, modals, theme, and the anti-bot guard rejecting
+  headless UAs. **Honest scope:** the graph, the agents and the Milvus retriever have almost no
+  *unit* tests; they are exercised end to end by the evals below, which run the real graph and
+  retriever against live services.
+- **Evals** (`evals/run_evals.py`; design in `EVALS-PLAN.md`) — seven tiers:
+
+  | Tier | What | Cost | Latest |
+  |---|---|---|---|
+  | T1 routing | 48 labelled questions through the real supervisor | LLM | 48/48 |
+  | T2 retrieval | 34 cases (14 held out), hit@k, MRR, content coverage | free, no LLM | 33/34, MRR 0.79 |
+  | T3 answer quality | calibrated LLM judge (stronger model than the generator), groundedness / relevance / completeness | 2 LLM calls/case, weekly | 14/14, judge calibration 4/4 |
+  | T4 canaries | 8 end-to-end questions with must-contain checks | LLM | 8/8 |
+  | T5 cost & latency | from the T4 runs: p50/p95, tokens, cache hits, $/question | — | ~$0.0011/question |
+  | T6 MCP | a real MCP client against `src/mcp_server.py`; live tool contract must equal `evals/fixtures/mcp_tools.json`; Host/Origin guard must refuse | ~$0 (no LLM) | 6/6 |
+  | T7 red team | 14 attacks, direct and planted at tool boundaries (TMDB, web search, MusicBrainz, KB passages via `kb_lookup`), with a check that each plant actually reached the prompt | LLM | 14/14 resisted |
+
+  `eval_nightly.sh` runs them by cron at 04:20 UTC (T3 weekly), gates each tier on
+  `evals/baseline.json` (bumping a baseline is a deliberate, reviewed commit), emails on
+  regression, and the results show on `/admin` and in the site's 🧪 Evals & ops modal. Every result
+  records the resolved model id.
+- **Tracing and feedback.** `src/tracing.py` makes LangSmith tracing deliberate: env auto-tracing
+  is switched off, each request gets an explicit tracer and run id (one question = one trace tree),
+  every string is PII-redacted before upload, client IPs never enter traces, eval runs go to a
+  separate project, and production traffic can be sampled (`TRACE_SAMPLE_RATE`). `src/feedback.py`
+  attaches 👍/👎 to the exact trace by run id; 👎 items feed `evals/feedback_triage.py`, which drafts
+  candidate eval cases for human review (never added automatically).
+- **CI** (`.github/workflows/ci.yml`) — on every push and PR: the privacy guard (full-tree scan +
+  commit identities), the backend unit tests, and a frontend `tsc` typecheck. Evals do not run in
+  CI (they need live services and keys); they run nightly on the host.
 
 ---
 
@@ -653,11 +741,11 @@ older port-80 / CF-Flexible arrangement — treat it as reference, not truth.
 |---|---|---|---|---|
 | Orchestration | LangGraph `StateGraph`, compiled DAG | LCEL chains; raw `asyncio.gather`; CrewAI/AutoGen | Explicit typed state, conditional fan-out, checkpointed multi-turn, and `astream_events` gives the SSE protocol for free | Framework lock-in; `astream_events` shape is an undocumented dependency; heavy for a 6-node graph |
 | Agent topology | Supervisor-router → parallel specialists → synthesiser | ReAct loop; single agent with tool-calling | Bounded ≤8 LLM calls, parallel I/O, inspectable routing decision | No self-correction, no re-retrieval, no tool chaining |
-| Routing | Keyword override, then LLM classifier, then tolerant parse | Pure LLM; embedding classifier; fine-tuned model | Deterministic for high-signal words; cheap (16 output tokens); rules are served to the UI from the same constants | Keyword list is hand-maintained; no measured routing accuracy |
+| Routing | Keyword override, then LLM classifier, then tolerant parse | Pure LLM; embedding classifier; fine-tuned model | Deterministic for high-signal words; cheap (16 output tokens); rules are served to the UI from the same constants; accuracy measured nightly (T1, 48 labelled questions) | Keyword list is hand-maintained; the labelled set is small |
 | LLM | Anthropic Claude via `langchain_anthropic`, one global tier | Per-node tiering; Groq/OSS; OpenAI | One env var flips the whole app; consistent instruction-following for the grounding rules | Router pays the same model as synthesis; can't use a cheap model for classification and a strong one for synthesis |
 | Vector DB | Milvus 2.5 standalone | Chroma, pgvector, Pinecone, Qdrant | Native BM25 `Function` + `hybrid_search` + `RRFRanker` server-side; same API scales to distributed | 3 extra containers (etcd, MinIO, Milvus) on a small VPS; heaviest dependency in the stack |
-| Retrieval | Hybrid BM25 + dense, RRF k=60 | Dense-only; BM25-only; weighted score fusion | Dense alone misses exact titles/proper nouns; RRF needs no score calibration across incompatible scales | Two ANN searches per query; k is untuned; no reranker |
-| Dense index | IVF_FLAT, nlist=128, IP, nprobe=10 | HNSW (M/efConstruction/efSearch); IVF_PQ | Full precision, fast build, adequate at this corpus size | Worse latency/recall curve than HNSW at scale; params are defaults, not measured |
+| Retrieval | Hybrid BM25 + dense, RRF k=60 | Dense-only; BM25-only; weighted score fusion | Dense alone misses exact titles/proper nouns; RRF needs no score calibration across incompatible scales | Two ANN searches per query (three with the gate's dense-only score); RRF k is untuned; a cross-encoder reranker was measured and rejected (no held-out recall gain) |
+| Dense index | IVF_FLAT, nlist=128, IP, nprobe=10 | HNSW (M/efConstruction/efSearch); IVF_PQ | Full precision, fast build, adequate at this corpus size | Worse latency/recall curve than HNSW at scale; params are defaults, never swept against the T2 recall set |
 | Embeddings | OpenAI `text-embedding-3-small` (1536-d) | `-3-large` (3072-d); bge/E5 local; Ollama nomic | Cheapest credible quality; re-embedding a large review corpus is the main embedding cost | External dependency + key for what could be local; documented Ollama path doesn't exist in code |
 | Transport | SSE via hand-rolled `StreamingResponse` | WebSocket; long-poll; `sse-starlette` | Unidirectional fits exactly; `EventSource` auto-reconnects; passes Cloudflare with buffering off | No client→server channel (can't cancel a run server-side); token must ride in the URL |
 | Checkpointer | `MemorySaver` | `SqliteSaver`, `PostgresSaver`, Redis | Zero infra, trivial multi-turn | History lost on restart; blocks horizontal scaling; unbounded thread growth |
@@ -681,9 +769,10 @@ older port-80 / CF-Flexible arrangement — treat it as reference, not truth.
 3. **`usage.py` in-memory counters.** Per-IP windows, the day's token total, the global call counter
    and the auth-lockout map are all module globals. Any horizontal scaling multiplies every limit by
    the worker count. Redis with `INCR`/`EXPIRE` is the standard answer.
-4. **Anthropic rate limits.** No retry, no backoff, no queue. One 429 kills the request and sets a
-   5-minute in-memory warning flag. At 10× traffic this becomes the dominant error class. Needs
-   `max_retries` with jittered backoff plus a request queue with an admission bound.
+4. **Anthropic rate limits.** Only the SDK's default two retries with backoff; no queue, no
+   circuit breaker. A 429 that outlasts those retries kills the request and sets a 5-minute
+   in-memory warning flag. At 10× traffic this becomes the dominant error class. Needs explicit
+   retry policy plus a request queue with an admission bound.
 5. **Milvus standalone.** One node, one collection, ~1 GB-scale memory footprint on a shared VPS with
    etcd and MinIO next to it. `devops_check.py` already flags `MemAvailable < 0.4 G` — that is the
    canary. At 100× corpus, IVF_FLAT's flat storage becomes the constraint before query latency does.
@@ -702,15 +791,17 @@ real queue; and Anthropic capacity beyond the default tier.
 
 ### 100× corpus (millions of chunks)
 
-- Switch dense index IVF_FLAT → **HNSW** (or IVF_PQ if memory-bound) and actually measure recall@k
-  against a labelled set before/after.
+- Switch dense index IVF_FLAT → **HNSW** (or IVF_PQ if memory-bound) and measure the change with
+  T2 before/after. The harness exists; the 34-case set would need to grow well beyond its current
+  size to say anything about millions of chunks.
 - **Partition** by corpus type (`docs` vs `ebert`) or by decade, and pass partition/filter hints from
   the router so curated essays can't be swamped by review chunks.
 - Move ingestion off the single-process script: batching is already there (`EMBED_BATCH=256`, with
   per-batch failure isolation), but there's no parallelism, no checkpoint of embedding progress, and
   no backfill/repair job.
-- Add a reranking stage — at large corpora, top-6 from RRF without a cross-encoder is the dominant
-  quality loss.
+- Re-test a reranking stage. At today's size a cross-encoder bought no held-out recall
+  (`evals/experiments/README.md`), but at millions of chunks the candidate pool gets noisier and
+  the answer may change; the experiment script is there to re-run.
 
 ### Single points of failure
 
@@ -722,11 +813,14 @@ down the origin refuses everything.
 
 ### With real headcount, first three things
 
-1. Instrument: OpenTelemetry traces + a Prometheus/Grafana pair for per-node latency, per-route cost,
-   error rates and retrieval hit-rate. **Right now there is no way to answer "what's your p95".**
-2. Build an eval harness: 50–100 labelled Q/A pairs, RAGAS or equivalent (faithfulness, answer
-   relevancy, context precision/recall), plus a routing-accuracy confusion matrix, run in CI.
-3. Move state out of process (Redis/Postgres) and remove the blocking I/O.
+1. Production metrics: per-node latency, per-route cost and error rates from *real* traffic into a
+   metrics store with alerting. Today LangSmith holds per-request traces and T5 measures p50/p95 on
+   8 fixed canaries nightly, but nothing aggregates or alerts on live latency, so the honest answer
+   to "what's your p95 in production" is still "I'd have to pull it from the traces".
+2. Grow the evals: the seven-tier harness exists (§7), but its sets are small (48 routing, 34
+   retrieval, 14 judged answers) and mostly hand-written. Feed it from real 👎 feedback (the triage
+   script already drafts cases) and add context precision/recall to T3.
+3. Move state out of process (Redis/Postgres) and remove the remaining blocking I/O.
 
 ---
 
@@ -734,31 +828,60 @@ down the origin refuses everything.
 
 Name these before an interviewer finds them.
 
-- **No latency instrumentation. There is no measured p50/p95/p99.** The `done` event reports
-  `total_latency_ms` for that one request to that one browser, and `agent_end` reports per-node
-  latency — but nothing is aggregated, persisted, or alerted on. The whitepaper's "typically 3–6
-  seconds" is an impression, not a measurement. *In an interview, say exactly this, then describe how
-  you'd measure it: the SSE event stream already contains per-node timings, so shipping them to a
-  time-series store is a small change.*
-- **No retrieval quality metrics.** No RAGAS, no recall@k, no golden set, no A/B. `top_k=6`,
-  `RRF k=60`, `nprobe=10`, `nlist=128`, `chunk_size=800/900` are all defaults or guesses. The
-  compare-mode blind judge is a *demo*, not an eval — one sample, LLM-judged, results not recorded.
-- **No routing accuracy measurement.** The keyword overrides and the "when in doubt prefer tmdb"
-  tiebreaker were added in response to observed mis-routes, not to a measured confusion matrix.
-- **Observability is optional and off by default.** LangSmith is wired only through env vars
-  (`LANGCHAIN_TRACING_V2` defaults to `false` in `.env.example`); there is no tracing code in the
-  repo. Errors go to stdout and Docker json-file logs. There is no structured logging, no error
-  tracker, no metrics endpoint.
-- **No retries or circuit breakers** on any external call.
+Several gaps this section used to list have since been closed. They stay here, marked, because
+"here is what I found and what I did about it" is a better interview answer than a clean list.
+The live open-work list is `TODO.md` at the repo root.
+
+**Fixed since the first audit**
+
+- ~~No retrieval quality metrics.~~ **Fixed:** eval tier T2 (34 cases, 14 held out; hit@k, MRR,
+  content coverage; no LLM) runs nightly and gates on `evals/baseline.json`. Latest hit@k 33/34,
+  MRR 0.79. It has already paid for itself: it drove the header-aware chunking redesign, and it is how
+  the cross-encoder reranker was measured and *rejected*.
+- ~~No routing accuracy measurement.~~ **Fixed:** T1 runs 48 labelled questions through the real
+  supervisor nightly (latest 48/48).
+- ~~No answer-quality or end-to-end checks.~~ **Fixed:** T3 (weekly, calibrated LLM judge: 14/14,
+  calibration 4/4) and T4 canaries (8/8). The first T4 run found a real bug: the TMDB payload was
+  truncated before the crew, so no film answer named its director.
+- ~~No latency or cost measurement at all.~~ **Partly fixed:** T5 records p50/p95, tokens, cache
+  hits and $/question nightly (latest p50 6.3 s, p95 16.1 s, ~$0.0011/question), gated at >2×. But
+  that is 8 fixed canaries, not production traffic (still open, below).
+- ~~No tracing code; observability optional and off by default.~~ **Fixed:** `src/tracing.py` —
+  explicit LangSmith tracer per request (one question = one trace tree, with a run id), PII
+  redaction before upload, client IPs never sent, evals in a separate project, sampling. User 👍/👎
+  attaches to the exact trace (`src/feedback.py`) and 👎 items are triaged into draft eval cases.
+- ~~`parse_llm_json`, model resolution, guardrails and the MCP server untested.~~ **Fixed:** 190
+  unit tests (`backend/tests/`), run in CI with the privacy guard and a frontend typecheck
+  (`.github/workflows/ci.yml`).
+- ~~Prompt injection: accepted risk, no delimiting or sanitising.~~ **Mitigated and measured:**
+  `src/guardrails.py` cleans third-party text (tags, hidden Unicode), wraps it in `<untrusted_data>`
+  (spotlighting, forged delimiters defanged), and `LinkGuard` allow-lists links in the output
+  stream deterministically. T7 measures it: 14/14 attacks resisted, including injections planted in
+  TMDB, MusicBrainz, web results and KB passages, each checked to have actually reached the prompt.
+  Before hardening, link and misinformation injections got through intermittently.
+
+**Still open**
+
+- **No production latency/error metrics.** Per-request latency lives in the `done` event and in
+  LangSmith traces, and T5 gives a p95 on canaries — but nothing aggregates live traffic into a
+  p50/p95/p99, and nothing alerts on it. There is still no metrics endpoint, no structured logging
+  and no error tracker; errors go to stdout and Docker json-file logs.
+- **Small, mostly hand-written eval sets.** 48 routing, 34 retrieval, 14 judged answers, 14 attacks.
+  Good enough to catch regressions, too small to tune fine parameters against. `TOP_K`, `RRF k=60`,
+  `nprobe=10`, `nlist=128` and the BM25 constants are still defaults; only chunking, the KB gate
+  thresholds and the reranker decision were set by measurement.
+- **The graph, agents and Milvus retriever have few unit tests.** They are covered end to end by
+  the evals against live services, which catches regressions but is slower, costs tokens (except
+  T2) and does not run in CI.
+- **Thin retries, no circuit breakers.** Only the Anthropic SDK default retries and the MusicBrainz
+  client's 503/429 retry; nothing on TMDB, Tavily or Milvus.
 - **Blocking I/O on the async event loop** — the sync `TavilyClient` and `describe_collection`
   (the Milvus searches moved to `asyncio.to_thread`).
 - **`describe_collection` RPC on every query** instead of a cached schema check.
-- **Test coverage is lopsided:** `usage.py` is well covered by pytest and the whole UI by Playwright;
-  the graph, router, agents, `parse_llm_json` and the retriever have **no unit tests**.
-- **Prompt injection is accepted risk** (SEC-6): user text plus RAG/Tavily/TMDB text all flow into
-  Claude. The blast radius is genuinely small — the LLM has no tools, no secrets in context, and
-  cannot execute anything — but the system does not sanitise or delimit untrusted content beyond
-  prompt instructions.
+- **Nameless descriptive queries.** Follow-ups are rewritten, but there is no HyDE or multi-query;
+  T2's one standing miss (`wes-anderson-look`) is this case.
+- **In-process state** (quotas, checkpointer) blocks horizontal scaling (§9).
+
 - **Docs/code drift — found by this audit, now RESOLVED.** These were real and are recorded
   because the *pattern* is worth talking about in an interview, not because they still bite:
   - `HANDOFF.md` and `WHITEPAPER.md` described **Groq / `llama-3.3-70b-versatile`** throughout,
@@ -786,7 +909,10 @@ Name these before an interviewer finds them.
   feature-completion time and never re-derived from the code. The durable fix is not "update the
   docs" — it is a check that fails when they diverge (assert the documented model IDs exist in
   `MODELS`, assert every env var in `.env.example` is read by `config.py`, assert `AgentName`
-  matches the `_dispatch` mapping). That check does not exist yet.
+  matches the `_dispatch` mapping). That check still does not exist for these three. The pattern
+  *has* been applied elsewhere since: the MCP tool contract is pinned to a reviewed snapshot (T6
+  and a unit test), and the router-normalisation replica in `test_llm_contracts.py` fails if it
+  drifts from `supervisor.py`.
 
 ---
 
@@ -816,28 +942,35 @@ and I have no calibration data to normalise them.
 
 **4. Why IVF_FLAT and not HNSW?**
 Corpus size didn't justify HNSW's memory and build cost, and IVF_FLAT keeps full-precision vectors.
-Honestly: `nlist=128`/`nprobe=10` are defaults, not tuned against a recall measurement. At 100× corpus
-I'd switch to HNSW and tune `M`/`efConstruction`/`efSearch` against a labelled recall@k set — but I'd
-build the eval set first, because tuning without measurement is theatre.
+Honestly: `nlist=128`/`nprobe=10` are defaults. I now have a labelled retrieval set (T2: hit@k,
+MRR, 14 held-out cases) but haven't swept the index params against it, because at this size they
+aren't where the misses come from. At 100× corpus I'd switch to HNSW and tune
+`M`/`efConstruction`/`efSearch` against T2 — after growing it, because 34 cases can't resolve small
+recall differences and tuning without measurement is theatre.
 
 **5. Why inner product and not cosine or L2?**
 OpenAI embeddings are L2-normalised, so IP is mathematically equivalent to cosine and skips the
 normalisation step. It also has to match on both sides — index metric and search metric.
 
 **6. What's your p95 latency and where does it go?**
-I don't have one, and I won't invent it — there's no aggregation layer. What I can tell you is the
-shape: the critical path for a multi-agent route is router (~16 output tokens) → the slowest agent →
+On a fixed benchmark, yes: eval tier T5 replays 8 canary questions nightly, and the latest run was
+p50 6.3 s, p95 16.1 s, gated at a 2× jump. For *production* traffic I don't have an aggregated
+number and I won't invent one — the per-request timings are in LangSmith traces and the SSE events,
+but nothing rolls them up or alerts. The shape: the critical path for a multi-agent route is router (~16 output tokens) → the slowest agent →
 synthesis (up to 1200 tokens), and since agents run in parallel the fan-out width doesn't add
 serially. The TMDB agent is structurally the slowest because it makes two sequential LLM calls with
-an API round-trip between them. The per-node timings are already in the `agent_end` SSE events;
-shipping them to a time-series store is the smallest change that would let me answer this properly.
+an API round-trip between them. Shipping the per-node timings to a metrics store is the smallest
+change that would let me answer the production question properly.
 
 **7. How do you know retrieval is any good?**
-I don't, quantitatively — that's the biggest gap. What exists is a blind LLM-judge compare mode: same
-question answered with and without retrieved context, presented to a third call in random A/B order
-with provenance withheld. It's a good demo of grounding, but it's single-sample and unrecorded. A
-real answer needs a 50–100 pair golden set with RAGAS faithfulness / answer-relevancy / context-precision,
-run in CI on every retriever change.
+A labelled set, measured nightly. T2 runs 34 cases, 14 of them held out, through the real
+retriever with no LLM, scoring hit@k, MRR and content coverage; it gates on a committed baseline, so
+a retrieval regression fails the run and emails me. Latest: 33/34, MRR 0.79. The one miss is a
+nameless description ("symmetrical pastel production design…") that Ebert reviews outrank — a
+query-understanding problem. On top of that, T3 judges whole answers weekly for groundedness with a
+calibrated judge. The same harness is how I rejected a cross-encoder reranker: +0.10 MRR on the
+tuning set shrank to +0.05 held out, with no new documents found. The honest limit: 34 cases is
+small, and I don't yet measure context precision/recall per answer.
 
 **8. Give me a query this system gets wrong, and why.**
 "What did Ebert say about Nolan's use of practical effects?" — the retriever never passes a Milvus
@@ -875,12 +1008,13 @@ client→server channel, so I can't cancel a running graph server-side.
 `pipeline_error` on both ends.
 
 **13. How do you handle rate limits and API failures?**
-Poorly, honestly — that's a known gap. There are no retries anywhere. A 429 is caught in
+Thinly, honestly — that's a known gap. Anthropic calls get only the SDK's default two retries and
+MusicBrainz has its own 503/429 retry; TMDB, Tavily and Milvus get none. A 429 that survives is caught in
 `_stream_pipeline`, classified by string matching, the retry-after is regex-extracted, an in-memory
 flag is set for 5 minutes so `/api/status` shows "rate limited" even though the 5-token status ping
 still succeeds, and a typed `pipeline_error` goes to the UI as a banner. Error text is sanitised of
-`org_*`/`user_*`/`proj_*` identifiers before it's sent to the browser. What's missing is
-`max_retries` with jittered backoff and a circuit breaker.
+`org_*`/`user_*`/`proj_*` identifiers before it's sent to the browser. What's missing is a
+deliberate retry policy on every upstream and a circuit breaker.
 
 **14. How do you stop someone draining your Anthropic budget?**
 Four layers. Per-IP rolling window (10 per hour) keyed on `CF-Connecting-IP`; a site-wide
@@ -901,9 +1035,13 @@ overwrites from the real-IP-resolved `$remote_addr` so a client can't forge it �
 User text plus RAG chunks plus Tavily results plus TMDB fields all flow into the model. Blast radius
 is output manipulation and token waste: the LLM has no tools, no privileged actions, no secrets in
 context, and there's no user-controlled code or URL execution — so it can't escalate to RCE or data
-exfiltration. That's the documented, accepted risk. I don't currently delimit or sanitise untrusted
-content beyond prompt instructions, which I'd fix with explicit content fencing and an output check
-before I put this behind anything sensitive.
+exfiltration. Within that, I measured before hardening: a red-team tier (T7) plants injections at
+each tool boundary and checks the plant actually reached the prompt. The model ignored loud
+"ignore all instructions" text but intermittently passed through *data-shaped* attacks — a scam
+link in a web result, a fake "credits correction" in a TMDB overview. The fix is two layers:
+spotlighting (third-party text is cleaned of tags and hidden Unicode and wrapped in
+`<untrusted_data>` tags the system prompt explains) and a deterministic output allow-list
+(`LinkGuard`) that unlinks any URL not from a known source. Now 14/14 attacks resisted, nightly.
 
 **17. Your backend is one uvicorn process. What happens under concurrency?**
 It's fully async so concurrent SSE streams multiplex fine *in principle*. The Milvus searches now
@@ -939,17 +1077,20 @@ It's application-level dedup, not a database upsert — `auto_id=True` with plai
 collection has no natural key.
 
 **21. What would you do differently?**
-Build the eval harness before tuning any retrieval parameter — right now every retrieval number in
-this system is a default I can't defend with data. Second, instrument from day one; I can describe
-this architecture in detail but I can't tell you its p95, which is a bad position to be in. Third,
+Build the eval harness first. I built it late, and the order shows: the early retrieval numbers
+were defaults I couldn't defend, and the first eval runs immediately found real bugs (a truncated
+TMDB payload that dropped every film's director) and settled a decision (no reranker) that I would
+otherwise have argued from intuition. Second, production metrics from day one: I have traces and a
+canary p95, but not a live one. Third,
 put per-node model tiering in from the start: the router burning the same model as synthesis is pure
 waste when its entire output is one token.
 
 **22. What's the most over-engineered part? The most under-engineered?**
-Over: the observability *frontend* — a live pipeline graph, Gantt timeline, event log and context
-panel — is beautiful and has no backend counterpart, so I can show a user their own request in detail
-and tell you nothing about the aggregate. Under: quality measurement and resilience. Zero tests on
-the graph, agents, router or retriever; zero retries.
+Over: the observability *frontend* — a live step trace, pipeline graph, event log and context
+panel — is far richer than the backend's aggregate view, so I can show a user their own request in
+detail but can only tell you the aggregate through nightly evals and LangSmith, not a live metrics
+dashboard. Under: resilience. Thin retries, no circuit breakers, in-process state. Quality
+measurement used to be the answer here; it now has seven eval tiers, though the sets are small.
 
 **23. Why one Milvus collection for two very different corpora?**
 Simplicity, and it was a mistake. It means the 37 curated essays compete on equal footing with tens
@@ -1001,7 +1142,8 @@ VARCHAR, server-side `Function`) · **RRF** — *Reciprocal Rank Fusion*, `Σ 1/
 rank-based so no score normalisation needed · **IVF_FLAT**, **nlist**, **nprobe** (128 / 10 here) ·
 **HNSW**, **M**, **efConstruction**, **efSearch** (what you'd move to, not what you have) ·
 **metric type IP vs COSINE vs L2** (IP ≡ cosine on normalised embeddings) · **recall@k** ·
-**cross-encoder reranking** (absent) · **chunk size / overlap** (800/100, 900/120) ·
+**cross-encoder reranking** (measured, not shipped) · **relevance gate** (dense cosine 0.60/0.45 +
+grader) · **chunk size / overlap** (800/100, 900/120) ·
 **partitions** and **scalar filtering** (absent) · **upsert vs insert-only with `auto_id`** ·
 **`query_iterator`** (paginating past Milvus's 16,384-row query window).
 
@@ -1009,7 +1151,13 @@ rank-based so no score normalisation needed · **IVF_FLAT**, **nlist**, **nprobe
 TypedDict · **`max_tokens` as a cost control** (16 on the router) · **temperature omitted on Opus**
 (400 on sampling params) · **grounding** / **parametric knowledge** · **fenced-JSON hardening** ·
 **blind LLM-as-judge** with randomised A/B ordering and withheld provenance · **prompt injection
-blast radius**.
+blast radius** · **spotlighting** (`wrap_untrusted`) · **output allow-list** (`LinkGuard`).
+
+**Evals & observability:** **hit@k** / **MRR** / **held-out split** (T2) · **routing accuracy** (T1) ·
+**calibrated LLM-as-judge** (T3) · **canaries** (T4) · **cost/latency gates** (T5) ·
+**contract snapshot** (T6, MCP tools) · **red team with plant-validity check** (T7) · **regression
+baseline** (`evals/baseline.json`) · **trace per request with run id** · **PII redaction before
+upload** · **feedback → eval-case triage**.
 
 **Serving:** **SSE** vs **WebSocket** · **`proxy_buffering off`** / **`X-Accel-Buffering: no`**
 (the two settings that make streaming actually stream) · **backpressure** (SSE has none at the app

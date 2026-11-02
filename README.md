@@ -462,15 +462,13 @@ Tracing is explicit, not ambient (`cineai/backend/src/tracing.py`):
 
 ## Roadmap
 
+Done:
 - [x] **Automated evals** — routing accuracy, retrieval hit@k/MRR/content coverage, full-pipeline canaries, cost/latency, the MCP interface, a prompt-injection red team, and a calibrated LLM judge (groundedness, unanswerable questions) — nightly, gated, alerting. See `cineai/EVALS-PLAN.md`.
 - [x] **MCP server**: public retrieval tools plus an OAuth 2.1-protected agent tool, with a threat model and a nightly MCP eval tier. See `cineai/MCP-PLAN.md`.
 - [x] **Follow-up rewriting + knowledge base first** — standalone questions for the agents; calibrated relevance gate decides whether the RAG agent runs
-- [ ] **"RAG value" eval** — replaces the removed compare toggle: measure (e.g. with the existing blind-judge compare code) whether knowledge-base grounding improves answers, especially for reviews newer than the model's training data
-- [ ] **Is the RAG agent's summary call redundant?** — test letting the combiner read the passages directly
-- [ ] **Redis semantic cache** — skip the LLM for repeated or near-identical queries
-- [ ] **Streaming tokens in Event Log** — surface token stream in the observability panel alongside the answer
-- [ ] **User-provided documents** — API endpoint to ingest uploaded files into a per-session collection
-- [ ] **Multi-modal** — poster image embeddings alongside text for visual similarity search
+- [x] **Chat UI with a step trace** and the 🧪 Evals & ops panel (evals, scheduled jobs, ingest/embedding history)
 - [x] **Music agent + MusicBrainz** — artist/album routing and grounded answers
 - [x] **Ebert RAG pipeline** — Wayback scrape + `ingest_ebert.py` into shared Milvus collection (see HANDOFF.md)
 - [x] **Rules UI** — frontend modal backed by `/api/rules`
+
+Open work lives in one place: **[TODO.md](TODO.md)**.

@@ -186,9 +186,4 @@ Order, each shipped as code → tests/evals → docs → commit → push:
    🧪 Evals & ops modal (eval tiers, scheduled jobs, ingest/embedding history with exact tokens
    and cost).
 
-**Next**
-- **"RAG value" eval** to replace the removed compare toggle: measure (e.g. with the existing
-  blind-judge compare code) whether knowledge-base grounding improves answers, especially for
-  reviews newer than the model's training data.
-- **Is the RAG agent's summary call redundant?** Test letting the combiner read the passages
-  directly.
+**Next**: open work is tracked in **[../TODO.md](../TODO.md)**.
