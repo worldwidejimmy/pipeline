@@ -30,6 +30,9 @@ IN_FILE = Path(__file__).parent.parent / "data" / "ebert_reviews.jsonl"
 
 CHUNK_SIZE    = 900   # slightly larger for reviews — full paragraphs read better
 CHUNK_OVERLAP = 120
+EMBED_MODEL   = "text-embedding-3-small"
+EMBED_USD_PER_MTOK = 0.02   # OpenAI list price for text-embedding-3-small, per 1M input tokens
+HISTORY = Path(__file__).parent.parent / "data" / "ingest-history.jsonl"   # shown on the site (Evals & ops)
 EMBED_BATCH   = 256   # chunks embedded+inserted per batch (keeps peak memory low)
 
 
@@ -137,7 +140,7 @@ def main() -> None:
     )
 
     embedder = OpenAIEmbeddings(
-        model="text-embedding-3-small",
+        model=EMBED_MODEL,
         openai_api_key=cfg.openai_api_key,
     )
 
@@ -167,13 +170,14 @@ def main() -> None:
 
     if not all_texts:
         print("Nothing to insert.")
+        _record(0, 0, 0, None)
         return
 
     # Embed + insert in bounded batches so peak memory stays flat (important on
     # a small shared host — embedding ~150k vectors at once would OOM the box).
     # Each batch is embedded then immediately inserted and freed; a failed batch
     # is logged and skipped rather than losing the whole run.
-    print(f"\nEmbedding + inserting via OpenAI text-embedding-3-small (batches of {EMBED_BATCH})…")
+    print(f"\nEmbedding + inserting via OpenAI {EMBED_MODEL} (batches of {EMBED_BATCH})…")
     total = len(all_texts)
     inserted = 0
     failed = 0
@@ -199,11 +203,33 @@ def main() -> None:
     # Final stats
     stats = client.get_collection_stats(cfg.milvus_collection)
     total = stats.get("row_count", "?")
+    _record(len({s for s in all_sources}), inserted, _count_tokens(all_texts), total)
     print(f"\n✓ Done — {inserted} chunks added, {total} total in Milvus")
     print(f"  Reviews now answer questions like:")
     print(f"    'What did Ebert think of The Godfather?'")
     print(f"    'Best 4-star Ebert reviews'")
     print(f"    'Did Ebert like Blade Runner?'\n")
+
+
+def _count_tokens(texts: list[str]) -> int:
+    """Exact input tokens for the embedding call (cl100k_base, the text-embedding-3 tokenizer)."""
+    import tiktoken
+    enc = tiktoken.get_encoding("cl100k_base")
+    return sum(len(enc.encode(t)) for t in texts)
+
+
+def _record(reviews: int, chunks: int, tokens: int, total_rows) -> None:
+    """One line per run for the site's ingest history: what was embedded, with which model, at what cost."""
+    import datetime
+    rec = {"ts": datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
+           "reviews": reviews, "chunks": chunks, "embed_tokens": tokens,
+           "cost_usd": round(tokens * EMBED_USD_PER_MTOK / 1e6, 6), "model": EMBED_MODEL,
+           "chunk_size": CHUNK_SIZE, "chunk_overlap": CHUNK_OVERLAP, "total_rows": total_rows}
+    try:
+        with HISTORY.open("a") as f:
+            f.write(json.dumps(rec) + "\n")
+    except OSError as exc:
+        print(f"  (ingest history not written: {exc})")
 
 
 if __name__ == "__main__":

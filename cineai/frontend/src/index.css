@@ -2047,3 +2047,31 @@ html, body, #root {
 .query-section--docked { border-bottom: none; border-top: 1px solid var(--border); padding: 12px 22px 10px; background: var(--surface); }
 .query-section--docked .query-label { display: none; }
 .query-section--docked .privacy-note { margin-top: 6px; font-size: 10.5px; }
+
+/* ── Evals & ops panel ─────────────────────────────────────────────────────── */
+.header-btn-labeled {
+  background: var(--surface3); border: 1px solid var(--border-lit); border-radius: var(--radius);
+  color: var(--text); cursor: pointer; font-size: 12px; font-weight: 600; padding: 5px 10px; white-space: nowrap;
+}
+.header-btn-labeled:hover { border-color: var(--indigo); background: var(--indigo-glow); }
+.ops-list { display: flex; flex-direction: column; gap: 8px; }
+.ops-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; background: var(--surface2); }
+.ops-card-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ops-card-title { font-weight: 600; font-size: 13px; color: var(--text); }
+.ops-card-when { margin-left: auto; font-size: 11px; color: var(--text-muted); }
+.ops-card-what { font-size: 12px; color: var(--text-muted); margin: 4px 0 6px 16px; line-height: 1.5; }
+.ops-card-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-left: 16px; font-size: 12px; }
+.ops-result { font-family: var(--font-mono); font-size: 11.5px; color: var(--text); }
+.ops-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.ops-dot.ok { background: var(--green); }
+.ops-dot.bad { background: var(--red, #ef4444); }
+.ops-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.ops-table th { text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: .4px; color: var(--text-muted); padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.ops-table td { padding: 8px; border-bottom: 1px solid var(--border); vertical-align: top; color: var(--text); line-height: 1.45; }
+.ops-table details summary { cursor: pointer; }
+.ops-when { white-space: nowrap; }
+.ops-when span, .ops-dim { color: var(--text-muted); font-size: 11px; }
+.ops-quiet td { opacity: 0.6; }
+.ops-flow { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; line-height: 1.55; color: var(--text-muted); }
+.ops-flow strong { color: var(--text); }
+.site-footer { flex-shrink: 0; text-align: center; font-size: 10.5px; color: var(--text-muted); padding: 6px 0 8px; }

@@ -12,6 +12,7 @@ import { RoutingRulesModal } from './components/RoutingRulesModal'
 import { PasswordGate } from './components/PasswordGate'
 import { UsageBadge } from './components/UsageBadge'
 import { StepTrace } from './components/StepTrace'
+import { OpsModal } from './components/OpsModal'
 import { FeedbackBar } from './components/FeedbackBar'
 import { getAccessToken, clearAccessToken, apiFetch, makeSSEUrl, fetchUsage } from './api'
 
@@ -63,6 +64,7 @@ export default function App() {
   const [showKnowledge, setShowKnowledge] = useState(false)
   const [showStatus,    setShowStatus]    = useState(false)
   const [showRules,     setShowRules]     = useState(false)
+  const [showOps,       setShowOps]       = useState(false)
   // The pipeline graph/timeline/events panel: optional now that the chat shows each step.
   const [showPipeline,  setShowPipeline]  = useState(() => loadPref('sms-pipeline-panel', false))
   const [pendingQ,      setPendingQ]      = useState('')   // the question being answered (input clears on send)
@@ -87,7 +89,7 @@ export default function App() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { setShowKnowledge(false); setShowStatus(false); setShowRules(false)}
+      if (e.key === 'Escape') { setShowKnowledge(false); setShowStatus(false); setShowRules(false); setShowOps(false)}
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
@@ -316,6 +318,8 @@ export default function App() {
       {/* ── Status modal ────────────────────────────────────────────────── */}
       {showStatus && <StatusModal onClose={() => setShowStatus(false)} />}
 
+      {showOps && <OpsModal onClose={() => setShowOps(false)} />}
+
       {/* ── Routing rules modal ─────────────────────────────────────────── */}
       {showRules && <RoutingRulesModal onClose={() => setShowRules(false)} />}
 
@@ -390,6 +394,14 @@ export default function App() {
               aria-pressed={showPipeline}
             >
               ⚡
+            </button>
+            <button
+              className="header-btn-labeled"
+              onClick={() => setShowOps(true)}
+              title="Evals, scheduled jobs and the ingest/embedding history"
+              aria-label="Evals and ops"
+            >
+              🧪 Evals &amp; ops
             </button>
             <button
               className="header-icon-btn"
@@ -545,6 +557,8 @@ export default function App() {
 
         {/* In a conversation the composer docks under the latest answer, like any chat app. */}
         {chatting && composer}
+
+        <footer className="site-footer">© {new Date().getFullYear()} smartmoviesearch.com</footer>
       </div>
 
       {/* ── Right panel: AI Pipeline (optional; ⚡ in the header) ─────────────── */}

@@ -12,6 +12,7 @@ Endpoints:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
@@ -858,6 +859,14 @@ async def evals_summary():
         tiers.append({"tier": t, "name": r.get("name"), "status": r.get("status"),
                       "headline": headline, "at": r.get("at"), "model": r.get("model")})
     return {"updated": latest.get("updated"), "model": latest.get("model"), "tiers": tiers}
+
+
+@app.get("/api/ops/overview")
+async def ops_overview():
+    """PUBLIC: scheduled jobs (schedule + last run) and the ingest/embedding history for the
+    site's Evals & ops panel. Allow-listed fields only (src/ops.py)."""
+    from src import ops
+    return await asyncio.to_thread(ops.overview)
 
 
 @app.get("/api/evals/badge")
