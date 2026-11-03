@@ -167,6 +167,28 @@ metadata), so parallel agents' tokens no longer get mixed up.
 
 ---
 
+## Model selection: an eval-gated upgrade
+
+A new Claude model never reaches users untested, and never a pricier one by surprise. The
+pattern, small enough to copy into another app:
+
+| Piece | Where | What it does |
+|---|---|---|
+| Cost tier + pin | `.env`: `DEFAULT_MODEL_TIER=haiku`, optional `MODEL_PIN=<id>` | No model id in the code. The pin overrides everything and is the instant undo. |
+| Approved model | `evals/results/approved_model.json` (server state, gitignored) | What production runs. `src/llm.py:choose()`: pin → eval candidate → approved → newest (bootstrap only). |
+| Candidate | Models API `GET /v1/models`, newest id in the family (startup + every 24 h) | A newer model than the approved one is only a candidate; `/admin` shows it. |
+| Trial job | `eval_nightly.sh` → `run_evals.py --promote` (cron, after the nightly evals) | Runs routing, answer quality (LLM judge), canaries, cost/latency and red team on the candidate **in the eval process only** (`MODEL_CANDIDATE`); live traffic stays put. |
+| Promotion rule | `run_evals.py:promotion_decision()` (unit-tested) | Every tier passes its committed baseline **and** cost per question ≤ live × 1.10. A model with no price in `PRICES` is blocked: adding it is the one manual step. |
+| Switch | atomic write of the approval file | The app re-reads it on its next call (file mtime), no restart. Email: promoted (info) or not promoted (warn, with reasons). A blocked candidate retries Sundays or with `--force` (~$0.25 a try). |
+| Record | every eval result and `results/promotions.jsonl` | Model id, source (approved/pinned/candidate), effort/thinking as sent, $/question, cache-read ratio. |
+| Request params | `src/llm.py:request_params()` | Thinking/effort/sampling from the model's advertised capabilities, not its name, so a new generation doesn't 400 on `temperature` or spend a 16-token reply on thinking. |
+
+Live answers also log their summed usage (input, cache read/write, output, refusal/`max_tokens`
+stops) to `backend/data/llm-usage.jsonl`, giving a per-app daily cache-read ratio (🧪 Evals & ops)
+that the Console can't show when apps share a workspace.
+
+---
+
 ## Quick Start
 
 ### Prerequisites

@@ -103,9 +103,13 @@ def _load(name: str) -> list[dict]:
 
 def _model() -> dict:
     try:
-        from src.llm import resolve
+        from src.llm import resolve, request_params
         st = resolve()
-        return {"model": st["model"], "model_source": st["source"]}
+        p = request_params(st.get("caps"), 0)
+        # Effort/thinking as actually sent, so results on different models compare fairly.
+        effort = p.get("effort") or (p.get("thinking") or {}).get("type") and f"thinking {p['thinking']['type']}" \
+            or ("sampling (legacy)" if p.get("sampling") else "API default")
+        return {"model": st["model"], "model_source": st["source"], "effort": effort}
     except Exception as exc:                          # never let bookkeeping fail a run
         return {"model": "unknown", "model_source": f"error: {exc}"[:80]}
 
@@ -853,7 +857,10 @@ def promote(force: bool, verbose: bool) -> int:
         r["status"], r["gate"] = gate(r, base_all)
     cand_usd = next((r.get("usd_per_query") for r in results if r["tier"] == "t5"), None)
     ok, reasons = promotion_decision(results, live_usd, cand_usd)
-    record_ = {"model": newest, "live": live, "tier": tier, "at": _now(),
+    t5 = next((r for r in results if r["tier"] == "t5"), {})
+    record_ = {"model": newest, "live": live, "tier": tier, "at": _now(), "effort": _model()["effort"],
+               "usd_per_query": cand_usd, "live_usd_per_query": live_usd,
+               "cache_read_ratio": t5.get("cache_hit_rate"),
                "decision": "promoted" if ok else "blocked", "reasons": reasons}
     RESULTS.mkdir(parents=True, exist_ok=True)
     CANDIDATE.write_text(json.dumps(record_, indent=2) + "\n")
