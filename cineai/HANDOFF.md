@@ -170,7 +170,7 @@ ever upgrade LangChain and lose streaming, check here first.
 
 | Key | Where to Get | Cost | Used For |
 |---|---|---|---|
-| `ANTHROPIC_API_KEY` | console.anthropic.com → API Keys | Paid — haiku $1/$5, sonnet $3/$15, opus $5/$25 per 1M in/out | LLM inference (all agents) |
+| `ANTHROPIC_API_KEY` | console.anthropic.com → API Keys (a key in this app's own workspace) | Paid — haiku $1/$5, sonnet $3/$15, opus $5/$25 per 1M in/out | LLM inference (all agents) |
 | `TMDB_BEARER_TOKEN` | themoviedb.org → Settings → API | Free | Movie/TV data |
 | `OPENAI_API_KEY` | platform.openai.com | ~$0.02/1M tokens | Embeddings only (text-embedding-3-small) |
 | `TAVILY_API_KEY` | tavily.com | Free: 1000 searches/month | Web search agent (optional) |
@@ -571,7 +571,18 @@ The app is running live on the VPS (behind a CDN/WAF proxy — direct IP not lis
 
 **Docker Compose v2** is required (installed as CLI plugin at `/usr/local/lib/docker/cli-plugins/docker-compose`). The `Makefile` uses `docker compose` (space, not hyphen).
 
-**Environment:** `~/apps/pipeline/.env` is symlinked to `cineai/backend/.env`.
+**Environment:** the one real file is `~/apps/pipeline/.env` (repo root, mode 0600, git-ignored);
+`cineai/backend/.env` is a symlink to it (`../../.env`) and is what compose's `env_file` reads. The
+Anthropic key is this app's own per-workspace key, not a key shared with other apps. After changing
+`.env`, recreate the backend (`docker compose up -d --force-recreate --no-deps backend`): `env_file` is
+read only when the container is created, and every cron job runs inside that container via
+`docker compose exec`, so the recreate updates them too. No key is baked into any image or stored as a CI
+secret.
+
+**Cron logs:** the crontab sends each job's stdout to `~/backups/smartmoviesearch/<job>.log`, but
+`nightly_update.sh` and `eval_nightly.sh` write their own per-run logs instead
+(`backend/data/nightly-logs/` and `evals/results/logs/`), so `nightly.log` and `evals.log` staying empty is
+normal. Look in the per-run logs.
 
 ---
 
