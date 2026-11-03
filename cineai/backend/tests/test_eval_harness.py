@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "evals"))
 
-from run_evals import query_cost, canary_notes, check_canary, check_redteam, gate, mcp_contract_diff, redteam_notes  # noqa: E402
+from run_evals import promotion_decision, query_cost, canary_notes, check_canary, check_redteam, gate, mcp_contract_diff, redteam_notes  # noqa: E402
 
 INCEPTION = {"contain_any": ["DiCaprio", "Nolan"], "min_any": 2}
 
@@ -153,3 +153,25 @@ def test_query_cost_prices_cache_reads_and_writes():
     assert abs(query_cost(1_000_000, 0, 1_000_000, 0, price) - 0.10) < 1e-9     # all read: 0.1x
     assert abs(query_cost(1_000_000, 0, 0, 1_000_000, price) - 1.25) < 1e-9     # all written: 1.25x
     assert abs(query_cost(1_000_000, 200_000, 500_000, 0, price) - (0.5 + 0.05 + 1.0)) < 1e-9
+
+
+# ── Model promotion: quality AND cost must pass before a new model goes live ─────
+def _r(tier, status="pass"):
+    return {"tier": tier, "status": status, "headline": "h", "gate": ["REGRESSION — x"] if status == "fail" else []}
+
+
+def test_promotion_passes_when_quality_holds_and_cost_does_not_rise():
+    ok, why = promotion_decision([_r("t1"), _r("t4"), _r("t5")], live_usd=0.0011, cand_usd=0.0009)
+    assert ok and any("cost pass" in w for w in why)
+
+
+def test_promotion_blocked_by_any_regression():
+    ok, why = promotion_decision([_r("t1"), _r("t7", "fail")], 0.0011, 0.0009)
+    assert not ok and any(w.startswith("t7 FAIL") for w in why)
+
+
+def test_promotion_blocked_when_pricier_or_price_unknown():
+    assert not promotion_decision([_r("t1")], 0.0010, 0.0012)[0]           # +20%
+    assert promotion_decision([_r("t1")], 0.0010, 0.00109)[0]              # within +10%
+    assert not promotion_decision([_r("t1")], 0.0010, None)[0]              # not in PRICES
+    assert not promotion_decision([_r("t1")], None, 0.0009)[0]

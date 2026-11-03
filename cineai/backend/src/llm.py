@@ -7,11 +7,15 @@ server-wide setting:
   DEFAULT_MODEL_TIER = haiku | sonnet | opus   (cost tier; default haiku)
   MODEL_PIN          = <model id>              (optional — overrides auto-resolution)
 
-By default the tier resolves to the NEWEST model in that family, discovered from the
-Models API (GET /v1/models) at startup and re-checked every 24h. So when Anthropic
-ships a new Haiku the app moves to it without a code change — and the nightly evals
-(which record the model id on every result) are what notice if that move hurt
-quality. If the move regresses, set MODEL_PIN and recreate the backend.
+The tier runs its APPROVED model: the one recorded in evals/results/approved_model.json.
+The Models API (GET /v1/models, checked at startup and every 24h) tells us the NEWEST
+model in the family; when that differs from the approved one it is a *candidate*, and
+the nightly job (`run_evals.py --promote`) runs the evals on it in a separate process —
+quality gates against evals/baseline.json, plus cost per question vs the live model.
+Only a pass writes the new approval, which the app picks up on its next call (no
+restart). So a new Haiku never reaches users untested, and never a pricier one by
+surprise. No approval file yet → the newest model (the old behaviour; bootstrap).
+MODEL_PIN overrides everything; MODEL_CANDIDATE is the evals' per-process override.
 
 Request params are derived from the model's advertised CAPABILITIES, not from its id:
 newer generations reject sampling params and think by default, both of which break
@@ -20,9 +24,11 @@ naive calls (a 16-token router reply that the model spends on thinking).
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 from langchain_anthropic import ChatAnthropic
@@ -63,26 +69,67 @@ def pick_newest(models: list[dict], tier: str) -> dict | None:
     return max(fam, key=lambda m: str(m.get("created_at", "")), default=None)
 
 
+# The model the evals approved for the tier (written only by run_evals.py --promote).
+APPROVED_FILE = Path(os.environ.get("MODEL_APPROVED_FILE")
+                     or Path(__file__).resolve().parents[1] / "evals" / "results" / "approved_model.json")
+
+
+def read_approved(tier: str) -> str | None:
+    try:
+        d = json.loads(APPROVED_FILE.read_text())
+        return d.get("model") if d.get("tier") == tier else None
+    except (OSError, ValueError):
+        return None
+
+
+def _approved_mtime() -> float:
+    try:
+        return APPROVED_FILE.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def choose(models: list[dict], tier: str, pin: str = "", candidate: str = "",
+           approved: str | None = None) -> tuple[str, str]:
+    """(model id, source) — pure, unit-tested. Order: MODEL_PIN, the evals' candidate,
+    the approved model (while Anthropic still lists it), else the newest in the tier."""
+    ids = {m.get("id") for m in models}
+    newest = pick_newest(models, tier)
+    if pin:
+        return pin, "pinned"
+    if candidate:
+        return candidate, "candidate"
+    if approved and approved in ids:
+        return approved, "approved"
+    if newest:
+        # No approval yet (bootstrap), or the approved model was retired: newest is all there is.
+        return newest["id"], "auto" if not approved else "auto (approved model retired)"
+    return approved or FALLBACK[tier], "fallback"
+
+
 def resolve(force: bool = False) -> dict:
     """Resolve (and cache) the model for the configured tier. Never raises."""
     with _lock:
-        if not force and _state and time.time() - _state["resolved_at"] < _TTL_S:
+        mtime = _approved_mtime()
+        if not force and _state and time.time() - _state["resolved_at"] < _TTL_S \
+                and _state.get("approved_mtime") == mtime:
             return dict(_state)
         cfg, tier = get_config(), _tier()
         pin = (cfg.model_pin or "").strip()
+        candidate = os.environ.get("MODEL_CANDIDATE", "").strip()
+        approved = read_approved(tier)
         st: dict[str, Any] = {"tier": tier, "resolved_at": time.time(), "caps": None,
-                              "newest_in_tier": None, "error": None}
+                              "newest_in_tier": None, "approved": approved,
+                              "approved_mtime": mtime, "error": None}
         try:
             models = _list_models()
             newest = pick_newest(models, tier)
             st["newest_in_tier"] = newest["id"] if newest else None
-            chosen = next((m for m in models if m["id"] == pin), None) if pin else newest
-            st["model"] = pin or (newest["id"] if newest else FALLBACK[tier])
-            st["source"] = "pinned" if pin else ("auto" if newest else "fallback")
-            st["caps"] = (chosen or {}).get("capabilities")
+            st["model"], st["source"] = choose(models, tier, pin, candidate, approved)
+            st["caps"] = next((m for m in models if m["id"] == st["model"]), {}).get("capabilities")
         except Exception as exc:                      # offline/bad key → last-known-good
-            st["model"] = pin or FALLBACK[tier]
-            st["source"] = "pinned" if pin else "fallback"
+            st["model"] = pin or candidate or approved or FALLBACK[tier]
+            st["source"] = "pinned" if pin else "candidate" if candidate else "approved" if approved else "fallback"
             st["error"] = str(exc)[:160]
         if st["model"] != _state.get("model") and _state:
             print(f"[llm] model changed: {_state.get('model')} -> {st['model']} ({st['source']})")

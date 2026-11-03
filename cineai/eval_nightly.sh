@@ -12,7 +12,8 @@
 # Scheduled via cron at 04:20 UTC — before the 04:50 ops digest. Run manually:
 #   ./eval_nightly.sh            # nightly tiers
 #   ./eval_nightly.sh weekly     # force the weekly tier too
-# Cost: ~$0.01/night on Haiku 5.5; the weekly judge ~$0.2.
+# Then `--promote`: a newer model in the tier is evaluated before it may go live.
+# Cost: ~$0.01/night on Haiku 5.5; the weekly judge ~$0.2; a promotion attempt ~$0.25.
 #
 set -uo pipefail
 
@@ -45,5 +46,21 @@ if [[ $rc -ne 0 ]]; then
         echo "Full log on the server: cineai/$LOG"
         echo "Admin page: https://smartmoviesearch.com/admin"
     } | APP=smartmoviesearch SEVERITY=error ./send_email.py "$subj"
+fi
+
+# Model promotion: when Anthropic lists a newer model in the tier than the approved one,
+# evaluate it (separate process; live traffic stays on the approved model) and approve it
+# only if every tier passes and it costs no more per question. Emails either way.
+PLOG="$LOG_DIR/promote-$(date -u +%Y%m%dT%H%M%SZ).log"
+docker compose exec -T backend python3 /app/evals/run_evals.py --promote >"$PLOG" 2>&1
+prc=$?
+if grep -q "^PROMOTED" "$PLOG"; then
+    { grep -A12 "^PROMOTED" "$PLOG"; echo; echo "The app switched on its next call (no restart)."
+      echo "Undo: set MODEL_PIN=<previous model> in .env and recreate the backend."; } \
+        | APP=smartmoviesearch SEVERITY=info ./send_email.py "SmartMovieSearch: new model promoted after evals"
+elif grep -q "^BLOCKED" "$PLOG" || [[ $prc -gt 1 ]]; then
+    { grep -A12 "^BLOCKED" "$PLOG" || tail -20 "$PLOG"; echo; echo "Live traffic stays on the approved model."
+      echo "Full log on the server: cineai/$PLOG"; } \
+        | APP=smartmoviesearch SEVERITY=warn ./send_email.py "SmartMovieSearch: new model NOT promoted"
 fi
 exit $rc

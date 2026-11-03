@@ -30,7 +30,9 @@ EST_TOKENS_PER_CHUNK = 135         # measured mean (cl100k) over 2,268 review pa
 # Mirrors the server crontab (UTC). The crontab is the source of truth; keep this in step.
 JOBS = [
     {"id": "evals", "time": "04:20", "days": "daily", "name": "Evals",
-     "what": "Routing, retrieval, canary, cost/latency, MCP and red-team tiers; emails on a regression.",
+     "what": "Routing, retrieval, canary, cost/latency, MCP and red-team tiers; emails on a regression. "
+             "Then the model gate: a newer Claude model in the tier goes live only if it passes "
+             "the same evals and costs no more per question.",
      "llm": "yes: Claude answers the eval questions (the retrieval and MCP tiers use none)"},
     {"id": "judge", "time": "04:20", "days": "Sundays", "name": "Answer-quality judge",
      "what": "A stronger Claude model grades a fixed set of answers for grounding and completeness.",

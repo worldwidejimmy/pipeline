@@ -749,10 +749,18 @@ decide whether tracing is on at all (key present + `LANGCHAIN_TRACING_V2=true`).
 
 ## Model selection (added 2026-10)
 
-`DEFAULT_MODEL_TIER` (haiku|sonnet|opus) is a **cost tier**; `src/llm.py` resolves it to
-the **newest model in that family** via the Models API (startup + every 24h, last-known-good
-fallback). `MODEL_PIN=<id>` overrides — use it if a new model regresses the evals, then
-recreate the backend. Request params (thinking off where allowed, no `temperature` on the
+`DEFAULT_MODEL_TIER` (haiku|sonnet|opus) is a **cost tier**; `src/llm.py` runs the tier's
+**approved** model (`evals/results/approved_model.json`, gitignored server state). The Models
+API (startup + every 24h) reports the newest model in the family; a newer one is a
+**candidate**, evaluated by `eval_nightly.sh` → `run_evals.py --promote` (T1, T3, T4/T5, T7 in
+the eval process only, via `MODEL_CANDIDATE`). Promoted only if every tier passes its baseline
+AND $/question is within +10% of live; a model missing from `PRICES` in `run_evals.py` is
+blocked until its price is added (that's the one manual step for a new model). The app reads
+the new approval on its next call (no restart). Emails: "promoted" (info) or "NOT promoted"
+(warn); a blocked candidate is retried on Sundays or with `--promote --force` (~$0.25 a try).
+History: `evals/results/promotions.jsonl`; last attempt on `/admin`. If the approval file is
+lost the app falls back to the newest model (the old behaviour). `MODEL_PIN=<id>` overrides
+everything — also the undo for a promotion (then recreate the backend). Request params (thinking off where allowed, no `temperature` on the
 new generation) come from the model's advertised capabilities. `/admin` shows the live
 model, why it was chosen, and whether a newer one exists.
 

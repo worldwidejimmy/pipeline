@@ -77,7 +77,9 @@ def test_unknown_caps_sends_nothing_optional():
     assert llm.request_params(None, 900) == {"max_tokens": 900, "sampling": False}
 
 
-def _resolve_with(monkeypatch, *, tier="haiku", pin="", models=None, boom=False):
+def _resolve_with(monkeypatch, *, tier="haiku", pin="", models=None, boom=False, approved_file=None):
+    monkeypatch.setattr(llm, "APPROVED_FILE", approved_file or Path("/nonexistent/approved_model.json"))
+    monkeypatch.delenv("MODEL_CANDIDATE", raising=False)
     cfg = types.SimpleNamespace(model_tier=tier, model_pin=pin, anthropic_api_key="x")
     monkeypatch.setattr(llm, "get_config", lambda: cfg)
     def fake_list():
@@ -119,3 +121,51 @@ def test_bad_tier_means_haiku(monkeypatch):
 ])
 def test_text_of(content, expect):
     assert llm.text_of(content) == expect
+
+
+# ── The promotion gate: the approved model stays live until a candidate passes ──
+OLD_HAIKU = next(m["id"] for m in CATALOG if m["id"].startswith("claude-haiku-4"))
+
+
+def test_choose_order():
+    assert llm.choose(CATALOG, "haiku", pin="p") == ("p", "pinned")
+    assert llm.choose(CATALOG, "haiku", candidate="c", approved=OLD_HAIKU) == ("c", "candidate")
+    assert llm.choose(CATALOG, "haiku", approved=OLD_HAIKU) == (OLD_HAIKU, "approved")
+    assert llm.choose(CATALOG, "haiku") == ("claude-haiku-5-5", "auto")            # bootstrap
+    assert llm.choose(CATALOG, "haiku", approved="claude-haiku-retired") == \
+        ("claude-haiku-5-5", "auto (approved model retired)")
+    assert llm.choose([], "haiku", approved=OLD_HAIKU) == (OLD_HAIKU, "fallback")
+
+
+def test_newer_model_is_not_live_until_approved(monkeypatch, tmp_path):
+    f = tmp_path / "approved_model.json"
+    f.write_text(json.dumps({"tier": "haiku", "model": OLD_HAIKU}))
+    st = _resolve_with(monkeypatch, approved_file=f)
+    assert st["model"] == OLD_HAIKU and st["source"] == "approved"
+    assert st["newest_in_tier"] == "claude-haiku-5-5"          # the candidate, shown on /admin
+
+
+def test_approval_of_another_tier_is_ignored(monkeypatch, tmp_path):
+    f = tmp_path / "approved_model.json"
+    f.write_text(json.dumps({"tier": "sonnet", "model": "claude-sonnet-5-5"}))
+    assert _resolve_with(monkeypatch, approved_file=f)["model"] == "claude-haiku-5-5"
+
+
+def test_new_approval_is_picked_up_without_restart(monkeypatch, tmp_path):
+    import os
+    f = tmp_path / "approved_model.json"
+    f.write_text(json.dumps({"tier": "haiku", "model": OLD_HAIKU}))
+    assert _resolve_with(monkeypatch, approved_file=f)["model"] == OLD_HAIKU
+    f.write_text(json.dumps({"tier": "haiku", "model": "claude-haiku-5-5"}))
+    os.utime(f, (1, 2_000_000_000))                       # a new mtime invalidates the 24h cache
+    assert llm.resolve()["model"] == "claude-haiku-5-5"
+
+
+def test_candidate_env_is_for_the_eval_process(monkeypatch, tmp_path):
+    f = tmp_path / "approved_model.json"
+    f.write_text(json.dumps({"tier": "haiku", "model": OLD_HAIKU}))
+    _resolve_with(monkeypatch, approved_file=f)
+    monkeypatch.setenv("MODEL_CANDIDATE", "claude-haiku-5-5")
+    st = llm.resolve(force=True)
+    assert st["model"] == "claude-haiku-5-5" and st["source"] == "candidate"
+    assert st["caps"]                                      # params come from the candidate's caps

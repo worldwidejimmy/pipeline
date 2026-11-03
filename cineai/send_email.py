@@ -31,7 +31,7 @@ from pathlib import Path
 NOTIFIER = Path(
     os.environ.get(
         "ADMIN_NOTIFIER",
-        Path.home() / "Code" / "server-management" / "scripts" / "notify-admin.sh",
+        Path.home() / "apps" / "server-management" / "scripts" / "notify-admin.sh",
     )
 )
 

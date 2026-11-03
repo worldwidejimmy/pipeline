@@ -22,6 +22,8 @@ interface EvalsData {
 
 interface ModelInfo {
   tier: string; model: string; source: string; newest_in_tier: string | null
+  approved_at?: string | null
+  promotion?: { model: string; live: string; at: string; decision: 'promoted' | 'blocked'; reasons: string[] } | null
   resolved_at: number; error: string | null; thinking_types: string[]
 }
 
@@ -146,9 +148,15 @@ function ModelSection({ m, tr }: { m: ModelInfo | null; tr: TracingInfo | null }
     <dl className="adm-kv">
       <dt>Cost tier</dt><dd>{m.tier}</dd>
       <dt>Live model</dt><dd><code>{m.model}</code></dd>
-      <dt>Chosen by</dt><dd>{m.source === 'auto' ? 'auto — newest model in the tier'
+      <dt>Chosen by</dt><dd>{m.source === 'approved' ? `approved by the evals${m.approved_at ? ` (${m.approved_at.slice(0, 10)})` : ''}`
+        : m.source.startsWith('auto') ? `${m.source} — newest model in the tier`
         : m.source === 'pinned' ? 'MODEL_PIN (manual pin)' : 'fallback — Models API unreachable'}</dd>
-      <dt>Newest in tier</dt><dd>{m.newest_in_tier ?? '—'}{newer && <span className="status-badge badge-warn"> newer available</span>}</dd>
+      <dt>Newest in tier</dt><dd>{m.newest_in_tier ?? '—'}{newer && <span className="status-badge badge-warn"> candidate: evaluated nightly before it can go live</span>}</dd>
+      <dt>Last promotion</dt><dd>{!m.promotion ? 'none yet' : <>
+        <code>{m.promotion.model}</code> {m.promotion.decision === 'promoted'
+          ? <span className="status-badge badge-ok">promoted</span>
+          : <span className="status-badge badge-warn">blocked</span>} {m.promotion.at.slice(0, 10)}
+        <ul className="adm-reasons">{m.promotion.reasons.map(r => <li key={r}>{r}</li>)}</ul></>}</dd>
       <dt>Thinking modes</dt><dd>{m.thinking_types.join(', ') || '—'}</dd>
       <dt>Resolved</dt><dd>{ago(m.resolved_at)}{m.error && <span className="admin-error"> {m.error}</span>}</dd>
       <dt>Tracing</dt><dd>{!tr ? '—' : tr.enabled

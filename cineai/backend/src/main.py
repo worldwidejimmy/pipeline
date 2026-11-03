@@ -601,7 +601,8 @@ async def service_status():
         else:
             results["anthropic"] = {"status": "error", "detail": raw[:120]}
     from src.llm import resolve
-    # "auto" = newest model in the configured tier; "pinned" = MODEL_PIN; "fallback" = Models API unreachable
+    # "approved" = the tier's model that passed the evals; "auto" = newest in the tier (no
+    # approval yet); "pinned" = MODEL_PIN; "fallback" = Models API unreachable
     results["anthropic"]["model_source"] = resolve()["source"]
 
     # ── TMDB ────────────────────────────────────────────────────────────
@@ -943,11 +944,21 @@ async def admin_evals(request: Request):
 
 @app.get("/api/admin/model")
 async def admin_model(request: Request):
-    """Which model is live and why (auto newest-in-tier, MODEL_PIN, or fallback)."""
+    """Which model is live and why (the evals-approved model, MODEL_PIN, or fallback), and
+    the last promotion attempt (evals/results/candidate.json, written by run_evals --promote)."""
     _require_admin(request)
-    from src.llm import resolve
+    from src.llm import resolve, APPROVED_FILE
     st = resolve()
+    try:
+        promotion = json.loads((APPROVED_FILE.parent / "candidate.json").read_text())
+    except (OSError, ValueError):
+        promotion = None
+    try:
+        approved_at = json.loads(APPROVED_FILE.read_text()).get("approved_at")
+    except (OSError, ValueError):
+        approved_at = None
     return {k: st.get(k) for k in ("tier", "model", "source", "newest_in_tier", "resolved_at", "error")} | {
+        "approved_at": approved_at, "promotion": promotion,
         "thinking_types": sorted(k for k, v in (((st.get("caps") or {}).get("thinking") or {})
                                                 .get("types") or {}).items() if v.get("supported")),
     }

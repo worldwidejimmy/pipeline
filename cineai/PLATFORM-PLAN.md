@@ -40,6 +40,10 @@ and what is admin-only.
   nightly run is flagged `model changed: X → Y` in the email and on the dashboard. A
   silent upgrade that regresses quality is exactly what the evals exist to catch.
 
+*Update 2026-11-03:* the move is now **gated**: a newer model is a candidate until
+`run_evals.py --promote` passes it (quality vs baseline + cost per question); see HANDOFF →
+Model selection.
+
 **Public/admin:** the model id is already visible on the public status modal. That's fine.
 
 ---

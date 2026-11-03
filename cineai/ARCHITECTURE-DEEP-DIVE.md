@@ -482,10 +482,14 @@ FAMILIES = {"haiku": "claude-haiku-", "sonnet": "claude-sonnet-", "opus": "claud
 FALLBACK = {"haiku": "claude-haiku-5-5", "sonnet": "claude-sonnet-5-5", "opus": "claude-opus-5-5"}
 ```
 
-`DEFAULT_MODEL_TIER` is a **cost tier**, not a model id: `resolve()` asks the Models API for the
-newest model in that family at startup (re-checked every 24 h), falls back to `FALLBACK` if the API
-is unreachable, and `MODEL_PIN` overrides both. Every eval result records the resolved model id, so
-the nightly evals are what notice if an automatic move to a new model hurt quality.
+`DEFAULT_MODEL_TIER` is a **cost tier**, not a model id. The app runs the tier's **approved** model
+(`evals/results/approved_model.json`). `resolve()` asks the Models API for the newest model in the
+family at startup (re-checked every 24 h); if it is newer than the approved one it is a *candidate*,
+and the nightly `run_evals.py --promote` runs T1, T3, T4/T5 and T7 on it in a separate process
+(`MODEL_CANDIDATE`; live traffic is untouched). It is approved only if every tier passes its baseline
+and its cost per question is within 10% of the live model's (an unknown price blocks); the app picks
+up the new approval on its next call, no restart. `FALLBACK` covers an unreachable API and
+`MODEL_PIN` overrides everything. The admin is emailed either way.
 
 **There is no per-node model routing.** That single server-wide tier (default `haiku`) selects the
 model for *every* app call — supervisor, agents, synthesiser, KB grader. (The T3 eval judge is the

@@ -779,13 +779,116 @@ def record(results: list[dict], model: dict) -> None:
         (RESULTS / f"{r['tier']}_last_cases.json").write_text(json.dumps(r.get("cases", []), indent=1))
 
 
+# ── Model promotion: a new model in the tier must pass before it goes live ─────
+CANDIDATE = RESULTS / "candidate.json"        # the last promotion attempt (admin page reads it)
+COST_TOLERANCE = 1.10                          # candidate $/question may be at most 10% above live
+PROMOTE_TIERS = "t1, t3, t4 (+t5), t7"
+
+
+def promotion_decision(results: list[dict], live_usd: float | None, cand_usd: float | None) -> tuple[bool, list[str]]:
+    """Promote only if every tier passes its baseline gate and the candidate costs no more
+    than the live model per question. Pure — unit-tested."""
+    reasons = [f"{r['tier']} {r['status'].upper()}: {r['headline']}"
+               + (f" ({'; '.join(r['gate'])})" if r["status"] == "fail" else "") for r in results]
+    ok = all(r["status"] != "fail" for r in results)
+    if cand_usd is None:
+        ok = False
+        reasons.append("cost UNKNOWN: add the candidate's price to PRICES in run_evals.py")
+    elif live_usd is None:
+        ok = False
+        reasons.append("cost UNKNOWN for the live model: run the nightly t4/t5 first")
+    elif cand_usd > live_usd * COST_TOLERANCE:
+        ok = False
+        reasons.append(f"cost FAIL: ${cand_usd:.5f}/question vs live ${live_usd:.5f} (> +{COST_TOLERANCE - 1:.0%})")
+    else:
+        reasons.append(f"cost pass: ${cand_usd:.5f}/question vs live ${live_usd:.5f}")
+    return ok, reasons
+
+
+def promote(force: bool, verbose: bool) -> int:
+    """Nightly: if Anthropic lists a newer model in the tier than the approved one, run the
+    LLM tiers on it (this process only; live traffic stays on the approved model) and
+    approve it on a pass. Exit 0 = up to date or promoted · 1 = candidate blocked."""
+    from src import llm
+    st = llm.resolve(force=True)
+    live, newest, tier = st["model"], st["newest_in_tier"], st["tier"]
+    if st["source"] == "pinned":
+        print(f"MODEL_PIN={live} is set: promotion is off")
+        return 0
+    if not newest or newest == live:
+        if not st.get("approved") and live:          # first run: approve what is live today
+            _write_approval(tier, live, None, ["bootstrap: the live model when the promotion gate began"])
+            print(f"APPROVED {live} (bootstrap)")
+        else:
+            print(f"up to date: {live} is the newest {tier}")
+        return 0
+    try:
+        prev = json.loads(CANDIDATE.read_text())
+    except (OSError, ValueError):
+        prev = {}
+    if prev.get("model") == newest and prev.get("decision") == "blocked" and not force \
+            and datetime.now(timezone.utc).isoweekday() != 7:
+        print(f"candidate {newest} was blocked on {prev.get('at')}: retried on Sundays (or --force)")
+        return 1
+
+    try:
+        live_usd = json.loads(LATEST.read_text())["tiers"]["t5"]
+        live_usd = live_usd["usd_per_query"] if live_usd.get("model") == live else None
+    except (OSError, ValueError, KeyError):
+        live_usd = None
+    os.environ["MODEL_CANDIDATE"] = newest
+    llm.resolve(force=True)
+    print(f"\nCandidate {newest} (live: {live}) — running {PROMOTE_TIERS}\n")
+    base_all = json.loads(BASELINE.read_text()) if BASELINE.exists() else {}
+
+    async def run_all() -> list[dict]:
+        out = [await run_routing(verbose), await run_quality(verbose)]
+        out.extend(await run_canaries(verbose))
+        out.append(await run_redteam(verbose))
+        return out
+
+    results = asyncio.run(run_all())
+    for r in results:
+        r["status"], r["gate"] = gate(r, base_all)
+    cand_usd = next((r.get("usd_per_query") for r in results if r["tier"] == "t5"), None)
+    ok, reasons = promotion_decision(results, live_usd, cand_usd)
+    record_ = {"model": newest, "live": live, "tier": tier, "at": _now(),
+               "decision": "promoted" if ok else "blocked", "reasons": reasons}
+    RESULTS.mkdir(parents=True, exist_ok=True)
+    CANDIDATE.write_text(json.dumps(record_, indent=2) + "\n")
+    with (RESULTS / "promotions.jsonl").open("a") as f:
+        f.write(json.dumps(record_) + "\n")
+    (RESULTS / "candidate_cases.json").write_text(json.dumps(
+        {r["tier"]: r.get("cases", []) for r in results}, indent=1))
+    if ok:
+        _write_approval(tier, newest, live, reasons)
+    print(f"\n{'PROMOTED' if ok else 'BLOCKED'} {newest} (live was {live})")
+    for line in reasons:
+        print(f"  {line}")
+    return 0 if ok else 1
+
+
+def _write_approval(tier: str, model: str, previous: str | None, evidence: list[str]) -> None:
+    from src import llm
+    llm.APPROVED_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = llm.APPROVED_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"tier": tier, "model": model, "previous": previous,
+                               "approved_at": _now(), "evidence": evidence}, indent=2) + "\n")
+    tmp.replace(llm.APPROVED_FILE)                 # atomic: the app never reads half a file
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--tier", default="t2", help="comma list of t1,t2,t3,t4,t6,t7 (t5 rides on t4) or 'nightly'")
     ap.add_argument("--k", type=int, default=None, help="override top_k (t2 sweep)")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--no-gate", action="store_true", help="report only, never exit non-zero")
+    ap.add_argument("--promote", action="store_true",
+                    help="evaluate the newest model in the tier and approve it if it passes")
+    ap.add_argument("--force", action="store_true", help="--promote: retry a blocked candidate now")
     a = ap.parse_args()
+    if a.promote:
+        return promote(a.force, not a.json)
 
     tiers = {"t1", "t2", "t4", "t6", "t7"} if a.tier == "nightly" else set(a.tier.split(","))
     unknown = tiers - {"t1", "t2", "t3", "t4", "t5", "t6", "t7"}
