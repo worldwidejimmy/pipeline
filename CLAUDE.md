@@ -38,4 +38,4 @@ synthesizes a single streaming answer. The app lives under `cineai/`.
 - **Real client IP: use the CDN's client-IP header (`usage.client_ip`).** The frontend nginx clobbers `X-Real-IP` (see the `client-ip-chain` memory).
 - **Anthropic-powered** — consult the `claude-api` skill before changing model ids or LLM-call shape.
 - **Parsing LLM JSON: always use `src/llm.py:parse_llm_json`**, never bare `json.loads` — Claude wraps "JSON only" replies in ```json fences, and a silent except-fallback degrades answers without any error (this broke TMDB title lookups for weeks).
-- Shared VPS: unrelated apps run on this box — never wildcard-kill node/npm/python (kill by PID or use the app's own restart), and don't touch services you didn't start. (Server-wide rule in `~/.claude/CLAUDE.md`.)
+- Shared VPS: unrelated apps run on this box — never wildcard-kill node/npm/python (kill by PID or use the app's own restart), and don't touch services you didn't start. (Server-wide rule in `~/CLAUDE.md` → `server-management/SERVER-RULES.md`.)
