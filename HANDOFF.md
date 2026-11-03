@@ -39,6 +39,7 @@ This document is for anyone taking over the **movie, TV, and music** multi-agent
 | `cineai/nightly_update.sh` | **Nightly RAG refresh** — scrape (capped `--limit 800`) + ingest new reviews; emails a summary when it adds any. |
 | `cineai/backup.sh` | **Nightly backup** — tars `.env` + `data/` to `~/backups/smartmoviesearch` (keeps 14). Milvus is derived; restore via `ingest_ebert.py`. |
 | `cineai/devops_check.py` | **Nightly DevOps health check** — containers/app/disk/mem/backup/cert/ingest/evals → pings healthchecks.io (`smartmovie_search_devops`); emails only when 🔴 (or the ping fails). |
+| `cineai/eval_nightly.sh` | **Nightly evals** (04:20 UTC) + model promotion → pings healthchecks.io (`smartmovie_search_evals`, `/fail` on a regression or an Anthropic 401); emails on failure. |
 | `cineai/seo_check.py` | **Daily SEO audit** — title/description/OG/Twitter/canonical/JSON-LD + real robots.txt & sitemap.xml → pings healthchecks.io (`smartmovie_search_seo`); emails only on issues. |
 | `cineai/healthcheck.py` | healthchecks.io pinger (ok → ping, red → `/fail`). Sends only the one-line issue summary + the path of the saved report (`cineai/backend/data/ops-logs/<kind>-<UTC stamp>.log`), never the report itself (third party). Ping URLs in `~/.config/healthchecks.env` (`<slug>=https://hc-ping.com/<uuid>` per check, chmod 600, never in the repo). No key / ping fails → the caller emails instead. |
 | `cineai/send_email.py` | Shared SMTP notifier (reads `SMTP_*`/`ADMIN_EMAIL` from `backend/.env`; no-ops if unset). |

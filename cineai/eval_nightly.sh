@@ -63,4 +63,22 @@ elif grep -q "^BLOCKED" "$PLOG" || [[ $prc -gt 1 ]]; then
       echo "Full log on the server: cineai/$PLOG"; } \
         | APP=smartmoviesearch SEVERITY=warn ./send_email.py "SmartMovieSearch: new model NOT promoted"
 fi
+
+# healthchecks.io (slug smartmovie_search_evals): a green ping on a clean run, /fail on a
+# regression, a broken run or an Anthropic auth error (e.g. a revoked key); no ping if cron
+# never ran, which healthchecks.io also alerts on. Third party: fixed strings + log path only.
+auth=""
+grep -qiE 'authentication_error|invalid x-api-key|Error code: 401|401 Unauthorized' "$LOG" "$PLOG" \
+    && auth="Anthropic auth error (401): check the API key in .env"
+if [[ -n "$auth" && $rc -eq 0 ]]; then
+    { echo "$auth"; echo; echo "Full logs on the server: cineai/$LOG and cineai/$PLOG"; } \
+        | APP=smartmoviesearch SEVERITY=error ./send_email.py "🔴 SmartMovieSearch evals: Anthropic auth error"
+fi
+if [[ $rc -eq 0 && -z "$auth" ]]; then
+    echo -n "" | ./healthcheck.py smartmovie_search_evals ok
+else
+    case $rc in 0) why="";; 1) why="a tier regressed";; *) why="the eval run failed (exit $rc)";; esac
+    printf '%s\nfull log on the server: cineai/%s\n' "${auth:-$why}${auth:+${why:+; $why}}" "$LOG" \
+        | ./healthcheck.py smartmovie_search_evals fail
+fi
 exit $rc

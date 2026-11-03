@@ -41,3 +41,21 @@ def test_fail_suffix(tmp_path, monkeypatch):
     monkeypatch.setattr(hc.urllib.request, "urlopen", lambda req, timeout: seen.append(req.full_url) or R())
     assert hc.ping("sms_devops", ok=False, body="1 issue(s): disk 91%") is True
     assert seen == ["https://hc-ping.com/uuid-1/fail"]
+
+
+def test_slug_form_creates_check_uuid_form_does_not(tmp_path, monkeypatch):
+    _conf(tmp_path, monkeypatch, "HC_PING_KEY=k\nsms_devops=https://hc-ping.com/uuid-1\n")
+    seen = []
+
+    class R:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+
+    monkeypatch.setattr(hc.urllib.request, "urlopen", lambda req, timeout: seen.append(req.full_url) or R())
+    hc.ping("sms_evals", ok=True)
+    hc.ping("sms_evals", ok=False)
+    hc.ping("sms_devops", ok=False)
+    assert seen == ["https://hc-ping.com/k/sms_evals?create=1",
+                    "https://hc-ping.com/k/sms_evals/fail?create=1",
+                    "https://hc-ping.com/uuid-1/fail"]

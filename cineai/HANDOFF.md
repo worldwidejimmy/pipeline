@@ -622,7 +622,10 @@ the 30/day cap. Every result records the model id.
 
 - **Unattended:** `eval_nightly.sh`, cron **04:20 UTC** (before the 04:50 ops digest) —
   T1/T2/T4/T5/T6/T7 nightly, +T3 on Sundays. Exit 1 = regression, 3 = harness crashed; either
-  **emails the admin** via `send_email.py` → server-management `notify-admin.sh`.
+  **emails the admin** via `send_email.py` → server-management `notify-admin.sh`. It also pings
+  healthchecks.io (`smartmovie_search_evals`): green on a clean run; `/fail` on a regression, a crash or
+  an Anthropic auth error (401, e.g. a revoked key; that one emails even when the tiers pass); and no ping
+  at all if cron didn't run.
 - **Results:** `evals/` is bind-mounted into the backend; `evals/results/` (gitignored)
   holds `<tier>_*.jsonl` history, `<tier>_last_cases.json` and `latest.json`.
 - **Where you see them:** `/admin` (full detail, failing cases, trends), the ⚙️ status
