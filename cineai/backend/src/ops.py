@@ -11,6 +11,8 @@ Sources, all written by the jobs themselves under backend/data (gitignored):
                                   from 2026-11-02; older runs are estimated from their passage count)
   ops-logs/devops-*.log, devops-history.jsonl, seo-history.jsonl
   evals/results/latest.json       the eval runner
+  llm-usage.jsonl                 per-answer Claude usage incl. prompt caching (record_usage):
+                                  totals only, no question text, no IP
 """
 from __future__ import annotations
 
@@ -153,12 +155,57 @@ def _last_evals() -> tuple[dict, dict]:
     return ev, judge
 
 
+USAGE_LOG = DATA / "llm-usage.jsonl"
+
+
+def record_usage(*, model: str, calls: int, input_tokens: int, cache_read: int, cache_write: int,
+                 output_tokens: int, abnormal: list[str]) -> None:
+    """Append one answer's Claude usage. `input_tokens` is LangChain's total input, which
+    already includes the cached reads/writes. The eval runner sets USAGE_SOURCE=eval so
+    its answers are kept apart from visitors'. Never raises (bookkeeping only)."""
+    import os
+    row = {"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"), "model": model,
+           "source": os.environ.get("USAGE_SOURCE", "live"), "calls": calls, "in": input_tokens,
+           "cache_read": cache_read, "cache_write": cache_write, "out": output_tokens}
+    if abnormal:
+        row["abnormal"] = abnormal
+    try:
+        with USAGE_LOG.open("a") as f:
+            f.write(json.dumps(row) + "\n")
+    except OSError:
+        pass
+
+
+def usage_by_day(rows: list[dict], days: int = 7) -> list[dict]:
+    """Per day and source (live/eval): answers, tokens, cache-read ratio (cached reads /
+    all input tokens), refusals. Pure — unit-tested."""
+    agg: dict[tuple[str, str], dict] = {}
+    for r in rows:
+        k = (r.get("ts", "")[:10], r.get("source", "live"))
+        a = agg.setdefault(k, {"day": k[0], "source": k[1], "answers": 0, "calls": 0, "in": 0,
+                               "cache_read": 0, "cache_write": 0, "out": 0, "abnormal": 0, "models": set()})
+        a["answers"] += 1
+        for f in ("calls", "in", "cache_read", "cache_write", "out"):
+            a[f] += r.get(f, 0) or 0
+        a["abnormal"] += len(r.get("abnormal", []))
+        a["models"].add(r.get("model", "?"))
+    out = []
+    for k in sorted(agg, reverse=True):
+        a = agg[k]
+        a["cache_read_ratio"] = round(a["cache_read"] / a["in"], 3) if a["in"] else None
+        a["models"] = sorted(a["models"])
+        out.append(a)
+    keep = sorted({a["day"] for a in out}, reverse=True)[:days]
+    return [a for a in out if a["day"] in keep]
+
+
 def overview() -> dict:
     ev, judge = _last_evals()
     last = {"evals": ev, "judge": judge, "ingest": _last_ingest(), "backup": _last_backup(),
             "devops": _last_from_history("devops-history.jsonl"), "seo": _last_from_history("seo-history.jsonl")}
     return {
         "jobs": [{**j, "last": last.get(j["id"]) or {}} for j in JOBS],
+        "llm_usage": usage_by_day(_jsonl(USAGE_LOG)[-20_000:]),
         "ingest": {
             "wiring": {
                 "source": "rogerebert.com reviews (new ones found nightly via the Internet Archive index), "

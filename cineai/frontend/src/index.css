@@ -2111,3 +2111,5 @@ html, body, #root {
 .chats-del { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0 8px; font-size: 11px; }
 .chats-del:hover { color: var(--red); }
 .adm-reasons { margin: 4px 0 0; padding-left: 18px; font-size: 12px; color: var(--text-muted); }
+.ops-subhead { margin: 18px 0 4px; font-size: 13px; color: var(--text); }
+.ops-table-wrap { overflow-x: auto; }

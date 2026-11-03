@@ -234,7 +234,8 @@ link removals and the model. Older turns fold to one line: sources · seconds ·
 (cached %) / out · model. **Show prompt & response** under a step opens exactly what went in
 and out: the source's raw data (cyan), each Claude call's system and user messages (indigo) and
 Claude's reply (purple), so you can see which words came from TMDB, MusicBrainz, the web or the
-knowledge base and which from Claude. **🕘 Chats** keeps earlier conversations (in this browser
+knowledge base and which from Claude. A refusal or a reply cut off at `max_tokens` is flagged
+⚠ on its step. **🕘 Chats** keeps earlier conversations (in this browser
 only); "+ New chat" never discards one.
 
 **🧪 Evals & ops** (header): each eval tier (what / how / when / latest); scheduled jobs (UTC and

@@ -64,6 +64,7 @@ export interface LlmEndEvent {
   prompt_tokens: number;
   completion_tokens: number;
   cache_read_tokens?: number;
+  stop_reason?: string | null;                  // 'refusal' / 'max_tokens' are flagged in the trace
   prompt?: { role: string; text: string }[];   // the messages Claude received
   response?: string | null;                     // its reply (null for the answer itself)
   ts: number;

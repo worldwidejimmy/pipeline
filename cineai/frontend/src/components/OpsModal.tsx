@@ -12,8 +12,14 @@ interface IngestRun {
   at: string; ok: boolean; reviews: string[]; review_count: number; chunks: number
   embed_tokens: number; tokens_estimated: boolean; cost_usd: number; total_rows: number | null
 }
+interface UsageDay {
+  day: string; source: 'live' | 'eval'; answers: number; calls: number; in: number
+  cache_read: number; cache_write: number; out: number; abnormal: number; models: string[]
+  cache_read_ratio: number | null
+}
 interface Overview {
   jobs: Job[]
+  llm_usage?: UsageDay[]
   ingest: {
     wiring: {
       source: string; chunking: { reviews: string; guides: string }
@@ -118,6 +124,33 @@ export function OpsModal({ onClose }: { onClose: () => void }) {
                   )
                 })}
               </div>
+              {ops?.llm_usage && ops.llm_usage.length > 0 && (
+                <>
+                  <h4 className="ops-subhead">Claude usage &amp; prompt caching (last 7 days, UTC)</h4>
+                  <p className="rules-intro">
+                    Every answer's Claude calls, summed. <em>Cache read</em> is the share of input tokens served
+                    from the prompt cache (billed at a tenth of the price): the fixed instructions are cached,
+                    the question and the sources' data are not. Eval runs are counted separately.
+                  </p>
+                  <div className="ops-table-wrap">
+                    <table className="ops-table">
+                      <thead><tr><th>Day</th><th>Who</th><th>Answers</th><th>Claude calls</th><th>Tokens in / out</th>
+                        <th>Cache read</th><th>Refusals / cut off</th><th>Model</th></tr></thead>
+                      <tbody>
+                        {ops.llm_usage.map(u => (
+                          <tr key={u.day + u.source}>
+                            <td>{u.day}</td><td>{u.source === 'live' ? 'visitors' : 'evals'}</td>
+                            <td>{u.answers.toLocaleString()}</td><td>{u.calls.toLocaleString()}</td>
+                            <td>{u.in.toLocaleString()} / {u.out.toLocaleString()}</td>
+                            <td>{u.cache_read_ratio === null ? '—' : `${Math.round(u.cache_read_ratio * 100)}%`}</td>
+                            <td>{u.abnormal}</td><td>{u.models.join(', ')}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
               <p className="rules-intro" style={{ marginTop: 14 }}>
                 Also measured, kept with the code: the knowledge-base relevance gate's thresholds (68 labelled
                 questions, held-out split) and a reranker that was tested and <em>not</em> shipped.

@@ -237,6 +237,17 @@ async def extract(schema: Any, system: str, user: str, *, dynamic: str = "", max
         return None
 
 
+# Stops that mean the text is not a normal, complete reply. Newer models have no
+# server-side refusal fallback, so a refusal must be noticed here, not assumed away.
+ABNORMAL_STOPS = ("refusal", "max_tokens")
+
+
+def stop_reason(msg: Any) -> str | None:
+    """The API's stop_reason for a LangChain AIMessage (None when unknown)."""
+    meta = getattr(msg, "response_metadata", None) or {}
+    return meta.get("stop_reason") if isinstance(meta, dict) else None
+
+
 def text_of(content: Any) -> str:
     """Text of a message/chunk .content — a str, or a list of blocks when the model
     returned thinking blocks alongside text. Thinking is never surfaced."""

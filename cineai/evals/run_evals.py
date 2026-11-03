@@ -45,6 +45,7 @@ from pathlib import Path
 
 sys.path.insert(0, "/app")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
+os.environ.setdefault("USAGE_SOURCE", "eval")   # the usage log keeps eval answers apart from visitors'
 import src.tracing  # noqa: E402,F401  first: implicit tracing off (eval traces go to <project>-evals explicitly)
 
 HERE = Path(__file__).resolve().parent

@@ -760,7 +760,15 @@ the new approval on its next call (no restart). Emails: "promoted" (info) or "NO
 (warn); a blocked candidate is retried on Sundays or with `--promote --force` (~$0.25 a try).
 History: `evals/results/promotions.jsonl`; last attempt on `/admin`. If the approval file is
 lost the app falls back to the newest model (the old behaviour). `MODEL_PIN=<id>` overrides
-everything — also the undo for a promotion (then recreate the backend). Request params (thinking off where allowed, no `temperature` on the
+everything — also the undo for a promotion (then recreate the backend).
+
+**Per-app caching ground truth.** The Claude Console groups prompt caching by workspace only,
+so every answer appends its summed usage to `backend/data/llm-usage.jsonl` (`ops.record_usage`:
+model, calls, input, cache read/write, output, refusal/max_tokens stops; no question, no IP;
+eval runs tagged `source: eval`). `/api/ops/overview` → `llm_usage` gives the daily cache-read
+ratio (cached reads ÷ all input), shown in 🧪 Evals & ops → Evals. Each `llm_end` event also
+carries `stop_reason`; a `refusal` or `max_tokens` stop is logged and flagged ⚠ in the step trace
+(Haiku 5.5 has no server-side refusal fallback). Request params (thinking off where allowed, no `temperature` on the
 new generation) come from the model's advertised capabilities. `/admin` shows the live
 model, why it was chosen, and whether a newer one exists.
 

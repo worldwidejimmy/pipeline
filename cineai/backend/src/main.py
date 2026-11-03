@@ -29,10 +29,10 @@ from src import tracing  # first: switches implicit tracing off before any LLM c
 from src.graph.pipeline import build_pipeline, CineState, _get_memory
 from src.tools import tmdb_client
 from src import usage
-from src.llm import text_of
+from src.llm import text_of, stop_reason, ABNORMAL_STOPS
 import uuid
 
-from src import feedback, guardrails, mcp_server
+from src import feedback, guardrails, mcp_server, ops
 from src.compare import compare_stream
 
 app = FastAPI(title="SmartMovieSearch", version="2.0.0")
@@ -183,6 +183,8 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
     final_parts: list[str] = []     # the answer exactly as streamed (post-guard), for feedback
     routing: str | None = None
     llm_inputs: dict[str, list[dict]] = {}   # run id → the call's prompt messages
+    llm_calls = 0
+    abnormal: list[dict] = []                # refusal / max_tokens stops, per node
 
     yield _sse("pipeline_start", {
         "question":    question,
@@ -345,11 +347,17 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
                 c_write = details.get("cache_creation", 0) or 0
                 cache_read_tokens  += c_read
                 cache_write_tokens += c_write
+                llm_calls += 1
+                sr = stop_reason(output)
+                if sr in ABNORMAL_STOPS:
+                    abnormal.append({"agent": node, "stop_reason": sr})
+                    print(f"[llm] {node}: stop_reason={sr} ({compl_t} output tokens)")
                 yield _sse("llm_end", {
                     "agent":             node,
                     "prompt_tokens":     prompt_t,
                     "completion_tokens": compl_t,
                     "cache_read_tokens": c_read,
+                    "stop_reason":       sr,
                     "prompt":            llm_inputs.pop(event.get("run_id", ""), []),
                     # The answer's own text is already on screen; agents' replies aren't.
                     "response":          None if final else
@@ -412,6 +420,12 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
     total_ms = int(time.time() * 1000) - start_ms
     from src.llm import model_id
     model = model_id()
+    # Per-answer usage incl. caching, for the per-app cache-read ratio the Console can't show
+    # (it groups by workspace). Totals only: no question text, no IP.
+    await asyncio.to_thread(ops.record_usage, model=model, calls=llm_calls,
+                            input_tokens=total_prompt_tokens, cache_read=cache_read_tokens,
+                            cache_write=cache_write_tokens, output_tokens=total_completion_tokens,
+                            abnormal=[a["stop_reason"] for a in abnormal])
     if final_parts:
         feedback.remember(run_id, question=question, answer="".join(final_parts), route=routing,
                           model=model, traced=traced_id is not None)

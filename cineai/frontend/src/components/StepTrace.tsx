@@ -67,7 +67,7 @@ const STEP_SOURCE: Record<string, string> = {
   tmdb_agent: 'themoviedb.org', rag_agent: 'Milvus vector DB', search_agent: 'Tavily API',
   music_agent: 'MusicBrainz', guard: 'LinkGuard',
 }
-interface Tok { inp: number; out: number; calls: number }
+interface Tok { inp: number; out: number; calls: number; stops: string[] }
 
 // What each step's non-LLM part costs, and what its Claude calls (if any) are for. Lookups
 // themselves don't use tokens; the agents use Claude to choose a search and write a report.
@@ -96,8 +96,9 @@ export function buildSteps(events: PipelineEvent[]): { steps: Step[]; summary: s
   const tok: Record<string, Tok> = {}
   for (const e of events) {
     if (e.type !== 'llm_end') continue
-    const t = (tok[e.agent] ??= { inp: 0, out: 0, calls: 0 })
+    const t = (tok[e.agent] ??= { inp: 0, out: 0, calls: 0, stops: [] })
     t.inp += e.prompt_tokens; t.out += e.completion_tokens; t.calls++
+    if (e.stop_reason === 'refusal' || e.stop_reason === 'max_tokens') t.stops.push(e.stop_reason)
   }
 
   // Each Claude call's prompt and reply, and each source's raw data, per node.
@@ -196,7 +197,9 @@ export function buildSteps(events: PipelineEvent[]): { steps: Step[]; summary: s
     if (s.key === 'guard' || s.state === 'run') continue
     const t = tok[s.key], c = STEP_COST[s.key]
     const llm = t ? `Claude ×${t.calls} (${c?.llm ?? 'LLM'}): ${fmt(t.inp)} in · ${fmt(t.out)} out tokens` : 'no Claude call'
-    const spent = [c?.lookup, llm].filter(Boolean).join(' · ')
+    const stopped = t?.stops.length
+      ? `⚠ Claude ${t.stops.map(r => r === 'refusal' ? 'refused' : 'was cut off (max_tokens)').join(', ')}` : ''
+    const spent = [c?.lookup, llm, stopped].filter(Boolean).join(' · ')
     s.detail = s.detail ? `${s.detail}\n${spent}` : spent
   }
 
