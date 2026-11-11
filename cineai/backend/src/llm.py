@@ -33,6 +33,8 @@ from typing import Any
 
 from langchain_anthropic import ChatAnthropic
 
+from src import ai_usage
+
 from src.config import get_config
 
 # Family prefix per cost tier — resolution picks the newest model whose id starts with it.
@@ -184,6 +186,7 @@ def get_chat(*, temperature: float = 0.1, max_tokens: int = 1024,
         max_tokens=p["max_tokens"],
         streaming=streaming,
         stream_usage=True,   # populate usage_metadata on streamed responses
+        callbacks=[ai_usage.CALLBACK],   # one token line per call → data/ai-usage/ (src/ai_usage.py)
     )
     if p["sampling"]:
         kwargs["temperature"] = temperature

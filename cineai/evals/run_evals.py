@@ -419,6 +419,9 @@ async def run_quality(verbose: bool) -> dict:
                 messages=[{"role": "user", "content":
                            f"QUESTION:\n{c['q']}\n\nCONTEXT:\n{context[:12000] or '(nothing retrieved)'}"
                            f"\n\nANSWER:\n{answer[:6000]}"}])
+            from src import ai_usage
+            if (u := ai_usage.from_anthropic_usage(msg.usage)):
+                ai_usage.record(model=msg.model, role="judge", **u)
             if msg.stop_reason == "refusal":
                 raise RuntimeError("judge refused")
             v = json.loads(next(b.text for b in msg.content if b.type == "text"))

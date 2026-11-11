@@ -786,6 +786,16 @@ carries `stop_reason`; a `refusal` or `max_tokens` stop is logged and flagged �
 new generation) come from the model's advertised capabilities. `/admin` shows the live
 model, why it was chosen, and whether a newer one exists.
 
+**Server-wide AI usage log (per call).** For the server's AI token & spend dashboards and digests
+(spec: server-management `AI-USAGE.md`), every Claude call also appends one line to
+`cineai/data/ai-usage/YYYY-MM.jsonl` (UTC month; bind-mounted at `/app/ai-usage`, git-ignored):
+`{ts, provider, model, role, in, out, cache_read, cache_write_5m, cache_write_1h}`, tokens only.
+`src/ai_usage.py` does it, through a callback on every `get_chat()` model plus an explicit call
+for the T3 judge, which uses the SDK directly. `in` is Anthropic's uncached input, unlike
+`llm-usage.jsonl`, whose input includes the cache. `role` is `search`, `eval` (USAGE_SOURCE=eval:
+nightly evals and `--promote`) or `judge`. Lines are single O_APPEND writes and are never rewritten.
+The backend's `/api/status` Anthropic probe (a 5-token call) logs as `search`.
+
 ## Follow-ups and knowledge base first (2026-11-02)
 
 Graph: `understand → kb_lookup → supervisor_route → [tmdb|rag|search|music] → synthesise`.

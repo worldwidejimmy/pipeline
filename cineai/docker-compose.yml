@@ -92,10 +92,12 @@ services:
       - ./backend/.env
     environment:
       MILVUS_URI: http://milvus:19530   # override to use internal service name
+      AI_USAGE_DIR: /app/ai-usage
     volumes:
       - ./backend/docs:/app/docs:ro    # mount markdown corpus for ingest
       - ./backend/data:/app/data       # scraped reviews (jsonl) for ingest_ebert
       - ./evals:/app/evals             # eval datasets in, results/ out (persist across rebuilds)
+      - ./data/ai-usage:/app/ai-usage  # per-call token log for the server AI-usage dashboards
     depends_on:
       milvus: { condition: service_healthy }
     healthcheck:
