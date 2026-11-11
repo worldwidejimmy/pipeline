@@ -35,7 +35,13 @@ class Config:
 
     # Hybrid search
     embedding_dim: int = 1536          # text-embedding-3-small output dim
-    hybrid_rrf_k: int = int(os.getenv("HYBRID_RRF_K", "60"))  # RRF rank fusion k
+    # How the BM25 and dense lists are merged: "weighted" (default) adds the two normalised
+    # scores, dense 0.7 / BM25 0.3; "rrf" fuses by rank only. Weighted won on T2 (MRR 0.77 →
+    # 0.88, holdout 0.73 → 0.77, 2026-11-11): RRF let Ebert reviews that rank on both lists bury a
+    # guide that only the dense side finds (music-in-film).
+    hybrid_ranker: str = os.getenv("HYBRID_RANKER", "weighted")
+    hybrid_weights: str = os.getenv("HYBRID_WEIGHTS", "0.7,0.3")   # dense, BM25
+    hybrid_rrf_k: int = int(os.getenv("HYBRID_RRF_K", "60"))  # RRF rank fusion k (ranker "rrf")
 
 
 @lru_cache(maxsize=1)

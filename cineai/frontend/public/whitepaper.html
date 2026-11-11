@@ -489,11 +489,11 @@
     </div>
     <div class="tech-card">
       <div class="tech-card-label">Fusion</div>
-      <div class="tech-card-name">RRF ranking</div>
-      <div class="tech-card-desc">Reciprocal Rank Fusion merges both ranked lists into one. Gets the precision of BM25 and the recall of embeddings simultaneously.</div>
+      <div class="tech-card-name">Weighted fusion</div>
+      <div class="tech-card-desc">Normalises both lists' scores and adds them, dense 0.7 and BM25 0.3: the precision of BM25 and the recall of embeddings in one ranking. It replaced rank-only RRF after measuring better on the retrieval evals.</div>
     </div>
   </div>
-  <div class="info-box"><strong>Knowledge base first.</strong> Every question searches the knowledge base before routing. Retrieval always returns its nearest passages, so a gate decides whether they are useful — on the best dense cosine similarity, because the RRF score depends only on rank. Calibrated on 68 labelled questions: <strong>≥ 0.60 is relevant</strong> (zero false "relevant" on tuning and held-out splits), <strong>&lt; 0.45 is nothing useful</strong>, neither needing an LLM call; in between, a small Haiku grader decides (17/18 correct on that band). Relevant → the RAG agent joins and reuses the passages; not → it is skipped, saving its LLM call.</div>
+  <div class="info-box"><strong>Knowledge base first.</strong> Every question searches the knowledge base before routing. Retrieval always returns its nearest passages, so a gate decides whether they are useful — on the best dense cosine similarity, because the fused score is relative to the other results. Calibrated on 68 labelled questions: <strong>≥ 0.60 is relevant</strong> (zero false "relevant" on tuning and held-out splits), <strong>&lt; 0.45 is nothing useful</strong>, neither needing an LLM call; in between, a small Haiku grader decides (17/18 correct on that band). Relevant → the RAG agent joins and reuses the passages; not → it is skipped, saving its LLM call.</div>
 
   <h3>Anthropic Claude — LLM Inference</h3>
   <p>Every LLM call — follow-up rewriting, the knowledge-base grader, routing, per-agent intent extraction and final synthesis — goes through a single factory, <code style="font-family:var(--font-mono);font-size:13px;color:var(--amber)">llm.py:get_chat()</code>. The model is one server-wide cost tier (<code style="font-family:var(--font-mono);font-size:13px;color:var(--amber)">DEFAULT_MODEL_TIER</code>: haiku · sonnet · opus, default haiku) that runs the newest model in that tier once it has passed the evals (quality against the baseline, and no rise in cost per question); until then the previous model stays live. Streaming the answer token by token is what makes the UI feel instant.</p>
@@ -545,8 +545,8 @@
     <div class="innovation-item">
       <div class="innovation-icon">🔀</div>
       <div class="innovation-body">
-        <strong>Hybrid retrieval (BM25 + dense, RRF fusion)</strong>
-        <span>Outperforms either method alone. BM25 catches exact name matches; embeddings catch semantic similarity. RRF merges both ranked lists without needing a learned combiner.</span>
+        <strong>Hybrid retrieval (BM25 + dense, weighted fusion)</strong>
+        <span>Outperforms either method alone. BM25 catches exact name matches; embeddings catch semantic similarity. A weighted score merge (dense 0.7, BM25 0.3) combines them; it beat rank-only RRF on the retrieval evals.</span>
       </div>
     </div>
     <div class="innovation-item">

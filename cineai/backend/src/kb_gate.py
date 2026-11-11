@@ -2,8 +2,8 @@
 web pipeline (src/agents/kb_lookup.py) and the MCP server's search tool.
 
 `best` is the best cosine similarity between the question's embedding and its top
-passages (text-embedding-3-small). The fused RRF score can't be used: it depends only on
-rank. LOW/HIGH come from evals/experiments/kb_gate_experiment.py (2026-11-02, 44
+passages (text-embedding-3-small). The fused hybrid score can't be used: it is relative to
+the other results, not a calibrated similarity. LOW/HIGH come from evals/experiments/kb_gate_experiment.py (2026-11-02, 44
 answerable + 24 unanswerable questions, tuned on one split, checked on a held-out one):
 at HIGH, 0 false "relevant" on both splits; below LOW, only unanswerable questions; the
 band between held both kinds (about a quarter of questions), so it needs a judgement.

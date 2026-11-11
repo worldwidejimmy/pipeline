@@ -47,7 +47,7 @@ single token — embed the query, look at what comes back.
   `docs/music/artists/the-police.md`).
 - Metrics: **recall@k**, **MRR**, and *position of first relevant chunk*.
 - Catches exactly the Police failure, plus any regression from changing `TOP_K`,
-  chunk size, the embedding model, or `HYBRID_RRF_K`.
+  chunk size, the embedding model, or the fusion settings (`HYBRID_RANKER`, `HYBRID_WEIGHTS`).
 - Also a **coverage** report: which asked-about entities have no doc at all (The Cars).
 
 ### T3 — Answer-quality evals (LLM-as-judge) · **expensive** · nightly / pre-release

@@ -68,7 +68,7 @@ flowchart TD
     end
 
     TMDB --> TAPI["TMDB REST<br/>httpx, timeout=10"]
-    KBL --> MV[("Milvus 2.5.9 standalone<br/>hybrid_search + RRFRanker")]
+    KBL --> MV[("Milvus 2.5.9 standalone<br/>hybrid_search + WeightedRanker")]
     KBL --> EMB["OpenAI text-embedding-3-small<br/>1536-d"]
     SRCH --> TAV[Tavily]
     MUS --> MB[MusicBrainz]
@@ -145,7 +145,7 @@ Query: **"Show me good bank heist movies"**, `thread_id=t-123`.
 6. **`rag_agent`** (`agents/rag_agent.py`) reuses `kb_lookup`'s useful passages (no second
    search; it only calls `retrieve` itself if no lookup ran). The retrieval in `kb_lookup` is
    `tools/milvus_retriever.retrieve(question)`: embeds the query (`aembed_query`, 1536-d), checks
-   `_has_hybrid_schema()`, then issues two `AnnSearchRequest`s and fuses with `RRFRanker`, plus a
+   `_has_hybrid_schema()`, then issues two `AnnSearchRequest`s and fuses with `WeightedRanker` (dense 0.7 / BM25 0.3), plus a
    dense-only search for `dense_max`; each passage carries its cosine `similarity`. Returns
    `{rag_result, _rag_chunks}`.
    **`tmdb_agent`** (`agents/tmdb_agent.py:103`) makes *two* LLM calls: intent extraction
@@ -397,18 +397,22 @@ sparse_req = AnnSearchRequest(data=[query],     anns_field="sparse_vector",
                               param={"metric_type": "BM25"}, limit=k)
 raw = client.hybrid_search(collection_name=cfg.milvus_collection,
                            reqs=[dense_req, sparse_req],
-                           ranker=RRFRanker(k=cfg.hybrid_rrf_k),   # k = 60
+                           ranker=_ranker(cfg),   # WeightedRanker(0.7, 0.3)
                            limit=k, output_fields=["text", "source"])
 ```
 
-**Reciprocal Rank Fusion:** each document's fused score is `Σ_i 1/(k + rank_i)` over the lists it
-appears in, with `rank` 1-based and `k = HYBRID_RRF_K = 60` (`config.py:36`). RRF is *rank*-based,
-not score-based — which is exactly why it's the right choice here: BM25 scores and inner-product
-similarities live on incompatible scales, and normalising them would require calibration data this
-system doesn't have. Larger `k` flattens the curve (more recall, weaker top-rank dominance); smaller
-`k` sharpens precision. With `k=60` and `top_k=6`, a rank-1 hit contributes `1/61 ≈ 0.0164` and a
-rank-6 hit `1/66 ≈ 0.0152` — only a ~8% spread, so a document that appears in *both* lists almost
-always outranks one that dominates a single list. That's the intended behaviour.
+**Weighted score fusion (was RRF until 2026-11-11).** `WeightedRanker(0.7, 0.3)` normalises each
+list's scores (Milvus maps inner product and BM25 through arctan onto 0–1) and adds them, dense
+weighted 0.7 and BM25 0.3 (`HYBRID_RANKER`, `HYBRID_WEIGHTS` in `config.py`). The site used to use
+Reciprocal Rank Fusion, `Σ_i 1/(60 + rank_i)`, chosen because it needs no score calibration. Its
+flaw: with `k=60` a rank-1 hit scores `1/61` and a rank-6 hit `1/66`, only ~8% apart, so a passage
+on *both* lists almost always beats one that tops a single list. As Ebert reviews grew to ~120k
+chunks, reviews that matched a broad question on both lists started to bury a curated guide that
+only the dense side found. A nightly ingest of 23 chunks tipped `music-in-film` (dense rank 4, not
+in BM25's top 30) out of the top 6. Measured on T2: weighted fusion lifted MRR 0.772 → 0.882 and the
+never-tuned holdout cases 0.732 → 0.768, with content coverage unchanged at 100% and T3 grounded
+4.79/5. Dense 0.6/0.4 scored the same; RRF with a wider candidate pool (12 or 20) did not fix it.
+`HYBRID_RANKER=rrf` brings RRF back.
 
 `top_k` defaults to **6** (`config.py:30`, now read from the `TOP_K` env var). Note this is a
 single global k — there is no per-route or per-query-type k, so a broad "compare these five
@@ -438,13 +442,13 @@ RPC issued on *every single query* with no caching, unlike the client and embedd
 
 ### Honest failure modes
 
-- **No reranker, by measurement.** Top-6 RRF results go straight into the prompt. A cross-encoder
+- **No reranker, by measurement.** The top-6 fused results go straight into the prompt. A cross-encoder
   was tried (`evals/experiments/rerank_experiment.py`, FlashRank ONNX models on CPU): fusing
   MiniLM-L-12's order with the hybrid order reached MRR 0.942 on the 20 tuning cases, but on the
   14 held-out cases it moved MRR only 0.720 → 0.768 and found **no additional documents** at any k,
   for ~190 ms of CPU per RAG question. Not shipped; the write-up is in
   `evals/experiments/README.md`. The real misses are query-understanding problems, not ranking ones.
-- **Relevance is gated, not assumed.** RRF scores are rank-only, so they can't say "nothing here".
+- **Relevance is gated, not assumed.** The fused score is relative to the other results, so it can't say "nothing here".
   `kb_gate.py` gates on the best dense cosine instead (≥ 0.60 relevant, < 0.45 nothing useful, a
   Haiku grader in between), with thresholds tuned on a 68-question labelled set and checked on a
   held-out split (0 false "relevant"). Shipped; see `evals/experiments/README.md`. The thresholds
@@ -746,8 +750,8 @@ older port-80 / CDN "flexible" TLS arrangement — treat it as reference, not tr
 | Agent topology | Supervisor-router → parallel specialists → synthesiser | ReAct loop; single agent with tool-calling | Bounded ≤8 LLM calls, parallel I/O, inspectable routing decision | No self-correction, no re-retrieval, no tool chaining |
 | Routing | Keyword override, then LLM classifier, then tolerant parse | Pure LLM; embedding classifier; fine-tuned model | Deterministic for high-signal words; cheap (16 output tokens); rules are served to the UI from the same constants; accuracy measured nightly (T1, 48 labelled questions) | Keyword list is hand-maintained; the labelled set is small |
 | LLM | Anthropic Claude via `langchain_anthropic`, one global tier | Per-node tiering; Groq/OSS; OpenAI | One env var flips the whole app; consistent instruction-following for the grounding rules | Router pays the same model as synthesis; can't use a cheap model for classification and a strong one for synthesis |
-| Vector DB | Milvus 2.5 standalone | Chroma, pgvector, Pinecone, Qdrant | Native BM25 `Function` + `hybrid_search` + `RRFRanker` server-side; same API scales to distributed | 3 extra containers (etcd, MinIO, Milvus) on a small VPS; heaviest dependency in the stack |
-| Retrieval | Hybrid BM25 + dense, RRF k=60 | Dense-only; BM25-only; weighted score fusion | Dense alone misses exact titles/proper nouns; RRF needs no score calibration across incompatible scales | Two ANN searches per query (three with the gate's dense-only score); RRF k is untuned; a cross-encoder reranker was measured and rejected (no held-out recall gain) |
+| Vector DB | Milvus 2.5 standalone | Chroma, pgvector, Pinecone, Qdrant | Native BM25 `Function` + `hybrid_search` + rankers server-side; same API scales to distributed | 3 extra containers (etcd, MinIO, Milvus) on a small VPS; heaviest dependency in the stack |
+| Retrieval | Hybrid BM25 + dense, weighted score fusion (0.7 / 0.3) | Dense-only; BM25-only; RRF (used until 2026-11-11) | Dense alone misses exact titles/proper nouns; weighted fusion beat RRF on T2 (MRR 0.77 → 0.88, holdout 0.73 → 0.77) once Ebert reviews outnumbered the guides | Two ANN searches per query (three with the gate's dense-only score); the weights are set on 34 cases; a cross-encoder reranker was measured and rejected (no held-out recall gain) |
 | Dense index | IVF_FLAT, nlist=128, IP, nprobe=10 | HNSW (M/efConstruction/efSearch); IVF_PQ | Full precision, fast build, adequate at this corpus size | Worse latency/recall curve than HNSW at scale; params are defaults, never swept against the T2 recall set |
 | Embeddings | OpenAI `text-embedding-3-small` (1536-d) | `-3-large` (3072-d); bge/E5 local; Ollama nomic | Cheapest credible quality; re-embedding a large review corpus is the main embedding cost | External dependency + key for what could be local; documented Ollama path doesn't exist in code |
 | Transport | SSE via hand-rolled `StreamingResponse` | WebSocket; long-poll; `sse-starlette` | Unidirectional fits exactly; `EventSource` auto-reconnects; passes the CDN with buffering off | No client→server channel (can't cancel a run server-side); token must ride in the URL |
@@ -870,7 +874,7 @@ The live open-work list is `TODO.md` at the repo root.
   p50/p95/p99, and nothing alerts on it. There is still no metrics endpoint, no structured logging
   and no error tracker; errors go to stdout and Docker json-file logs.
 - **Small, mostly hand-written eval sets.** 48 routing, 34 retrieval, 14 judged answers, 14 attacks.
-  Good enough to catch regressions, too small to tune fine parameters against. `TOP_K`, `RRF k=60`,
+  Good enough to catch regressions, too small to tune fine parameters against. `TOP_K`, the fusion weights,
   `nprobe=10`, `nlist=128` and the BM25 constants are still defaults; only chunking, the KB gate
   thresholds and the reranker decision were set by measurement.
 - **The graph, agents and Milvus retriever have few unit tests.** They are covered end to end by
@@ -939,9 +943,10 @@ written only by `synthesise` in a later superstep. The moment I added a second n
 Two `AnnSearchRequest`s against the same collection: dense against `dense_vector` (IVF_FLAT, IP,
 nprobe=10) with the OpenAI query embedding, and sparse against `sparse_vector` with the **raw query
 text** — Milvus tokenises it server-side because the field is generated by a BM25 `Function` over an
-analyzer-enabled `text` field. `RRFRanker(k=60)` fuses them: `score = Σ_i 1/(60 + rank_i)`. It's
-rank-based, not score-based, which is the point — BM25 scores and inner products aren't comparable
-and I have no calibration data to normalise them.
+analyzer-enabled `text` field. `WeightedRanker(0.7, 0.3)` fuses them: each list's scores are normalised to 0–1 (arctan) and added
+with weights, dense 0.7 and BM25 0.3. It replaced `RRFRanker(k=60)` (`Σ 1/(60 + rank)`) on
+2026-11-11: RRF's rank-only score let reviews that appear on both lists bury a guide only the dense
+side found, and weighted fusion measured better on T2, holdout cases included.
 
 **4. Why IVF_FLAT and not HNSW?**
 Corpus size didn't justify HNSW's memory and build cost, and IVF_FLAT keeps full-precision vectors.
@@ -1141,8 +1146,8 @@ absent here because writes are disjoint) · **`InvalidUpdateError`** (what you'd
 an acyclic graph) · **supervisor/router pattern** vs **ReAct** vs **tool-calling loop**.
 
 **Retrieval:** **hybrid search** · **sparse vs dense** · **BM25** (`k1=1.2`, `b=0.75`, analyzer-enabled
-VARCHAR, server-side `Function`) · **RRF** — *Reciprocal Rank Fusion*, `Σ 1/(k + rank)`, `k=60`,
-rank-based so no score normalisation needed · **IVF_FLAT**, **nlist**, **nprobe** (128 / 10 here) ·
+VARCHAR, server-side `Function`) · **RRF** — *Reciprocal Rank Fusion*, `Σ 1/(k + rank)`, rank-based; replaced here by
+**weighted fusion** (normalised scores, dense 0.7 / BM25 0.3) · **IVF_FLAT**, **nlist**, **nprobe** (128 / 10 here) ·
 **HNSW**, **M**, **efConstruction**, **efSearch** (what you'd move to, not what you have) ·
 **metric type IP vs COSINE vs L2** (IP ≡ cosine on normalised embeddings) · **recall@k** ·
 **cross-encoder reranking** (measured, not shipped) · **relevance gate** (dense cosine 0.60/0.45 +

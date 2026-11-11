@@ -222,7 +222,7 @@ def overview() -> dict:
                               "usd_per_million_tokens": EMBED_USD_PER_MTOK,
                               "query_cost_usd": round(15 * EMBED_USD_PER_MTOK / 1e6, 9)},
                 "index": "Milvus 2.5: dense vectors (inner product = cosine) plus a BM25 sparse index Milvus "
-                         "builds from the same text; queries run both and fuse the rankings (RRF)",
+                         "builds from the same text; queries run both and merge the scores (weighted 0.7 dense / 0.3 BM25)",
                 "query_time": "Each question is embedded with the same model (one API call, about 15 "
                               "tokens) and searched in Milvus on this server. No Claude call, no per-search fee.",
             },

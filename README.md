@@ -166,7 +166,7 @@ pipeline/
 │   │   │   ├── graph/
 │   │   │   │   └── pipeline.py     LangGraph StateGraph (compiled, multi-turn)
 │   │   │   └── tools/
-│   │   │       ├── milvus_retriever.py  Hybrid search (BM25 + dense, RRF) + per-passage cosine similarity
+│   │   │       ├── milvus_retriever.py  Hybrid search (BM25 + dense, weighted fusion) + per-passage cosine similarity
 │   │   │       ├── tmdb_client.py       TMDB API client
 │   │   │       └── musicbrainz_client.py MusicBrainz client
 │   │   ├── docs/                   RAG knowledge base (markdown)
@@ -247,17 +247,17 @@ def _dispatch(state) -> list[str]:
 ### 3. Hybrid RAG (BM25 + Dense)
 
 The RAG agent uses Milvus 2.5's native sparse vector support to run BM25 and
-dense retrieval simultaneously, then fuses results via RRF (Reciprocal Rank
-Fusion):
+dense retrieval simultaneously, then fuses them by weighted score (dense 0.7, BM25 0.3; it replaced RRF on 2026-11-11
+after measuring better on the retrieval evals):
 
 ```python
 sparse_req  = AnnSearchRequest(query_sparse, "sparse_vector", {"drop_ratio_search": 0.2}, top_k)
 dense_req   = AnnSearchRequest(query_dense,  "dense_vector",  {"metric_type": "IP"}, top_k)
-results     = client.hybrid_search([sparse_req, dense_req], RRFRanker(k=60))
+results     = client.hybrid_search([sparse_req, dense_req], WeightedRanker(0.7, 0.3))
 ```
 
 Milvus calls run off the event loop (`asyncio.to_thread`). Each passage also carries its
-cosine similarity to the query: the RRF score depends only on rank, so it can't say whether
+cosine similarity to the query: the fused score is relative to the other results, so it can't say whether
 anything is relevant, and the gate needs a score that can.
 
 ### 4. SSE streaming
@@ -302,7 +302,7 @@ claude mcp add --transport http smartmoviesearch https://smartmoviesearch.com/mc
 
 | Tool | What it does |
 |---|---|
-| `search_knowledge_base` | Hybrid BM25 + dense (RRF) search over the curated guides and Ebert review excerpts; returns each result's cosine `similarity`, the `best_similarity` and a calibrated `relevant` verdict (`yes` / `no` / `unsure` — on `unsure` the caller's model judges) |
+| `search_knowledge_base` | Hybrid BM25 + dense (score-fused) search over the curated guides and Ebert review excerpts; returns each result's cosine `similarity`, the `best_similarity` and a calibrated `relevant` verdict (`yes` / `no` / `unsure` — on `unsure` the caller's model judges) |
 | `find_titles` / `get_title` | TMDB search, then details: crew, cast, similar titles |
 | `find_person` | TMDB person lookup with biography and best-known titles |
 | `get_artist` | MusicBrainz artist and discography |
@@ -363,7 +363,7 @@ knowledge-base lookup) and forced past the relevance gate, the worst case.
 ## Knowledge base first: a calibrated gate
 
 Retrieval always returns *something*, so "did the knowledge base have anything?" needs a
-signal. The hybrid search's RRF score can't be it: it depends only on rank. The best **dense
+signal. The hybrid search's fused score can't be it: it is relative to the other results. The best **dense
 cosine similarity** (`text-embedding-3-small`) of the top passages can. Calibrated on 68
 labelled questions (the 34 T2 retrieval cases + 34 in `evals/datasets/kb_gate.jsonl`,
 answerable and not), tuned on one split and checked on a held-out one:

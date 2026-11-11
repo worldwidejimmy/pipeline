@@ -75,9 +75,9 @@ Milvus is a distributed vector database that stores the movie knowledge corpus (
 
 - **Dense search** (OpenAI `text-embedding-3-small`): converts text to 1536-dimensional vectors; finds semantically similar content even when keywords differ
 - **Sparse search** (BM25, computed natively by Milvus 2.5+): exact keyword matching for proper nouns, titles, and specific terms
-- **RRF fusion**: combines both ranked lists into one, getting the best of precision and recall
+- **Weighted score fusion**: normalises both lists' scores and adds them (dense 0.7, BM25 0.3). It replaced rank-only RRF after RRF let reviews that matched on both lists bury a guide only the dense side found; it measured better on the retrieval evals
 
-**Knowledge base first.** Every question searches the knowledge base *before* routing. Retrieval always returns its nearest passages, so a gate decides whether they are useful. The RRF score can't: it depends only on rank. The best dense cosine similarity of the top passages can. Calibrated on 68 labelled questions: **≥ 0.60 is relevant** (zero false "relevant" on both the tuning and the held-out split), **< 0.45 is nothing useful**, and neither needs an LLM call; in the band between, a small Haiku grader decides and picks the useful passages (17/18 correct on that band). Dense similarity separated the classes far better than BM25. When the knowledge base is relevant, the RAG agent always joins and reuses those passages; when it isn't, the RAG agent is skipped, saving its LLM call.
+**Knowledge base first.** Every question searches the knowledge base *before* routing. Retrieval always returns its nearest passages, so a gate decides whether they are useful. The fused score can't: it is relative to the other results. The best dense cosine similarity of the top passages can. Calibrated on 68 labelled questions: **≥ 0.60 is relevant** (zero false "relevant" on both the tuning and the held-out split), **< 0.45 is nothing useful**, and neither needs an LLM call; in the band between, a small Haiku grader decides and picks the useful passages (17/18 correct on that band). Dense similarity separated the classes far better than BM25. When the knowledge base is relevant, the RAG agent always joins and reuses those passages; when it isn't, the RAG agent is skipped, saving its LLM call.
 
 **Why not just embeddings?** A query for "Christopher Nolan" should find documents that contain those exact words, not just semantically similar ones. BM25 handles this; embeddings alone can miss it.
 
@@ -135,7 +135,7 @@ Total latency: typically 3–6 seconds. The user sees tokens appearing within ~1
 
 | Aspect | What was done |
 |---|---|
-| **Hybrid retrieval** | Sparse BM25 + dense embeddings fused with RRF — outperforms either alone |
+| **Hybrid retrieval** | Sparse BM25 + dense embeddings fused by weighted scores — outperforms either alone |
 | **Parallel agents** | TMDB, RAG, and web search run concurrently, not sequentially |
 | **Multi-turn memory** | `MemorySaver` + `thread_id`; follow-ups are rewritten into standalone questions so every agent understands "its" and "his" |
 | **Knowledge base first** | A relevance gate calibrated on labelled questions decides whether the curated corpus has anything, usually with no LLM call |

@@ -2,13 +2,13 @@
   "_note": "Per-tier regression baselines read by evals/run_evals.py. Bumping a value is a deliberate, reviewable commit — never auto-written.",
   "t2": {
     "hit_rate": 0.9706,
-    "mrr": 0.7868,
+    "mrr": 0.8824,
     "misses": [
       "wes-anderson-look"
     ],
     "content_coverage": 1.0,
     "partial_coverage": [],
-    "_note": "Baseline bumped 2026-08-27 after hierarchical chunking (round 2). Deliberate trade accepted: MRR 0.883->0.825 (a few rank-1s now rank-2; larger merged sections embed more diffusely) in exchange for content coverage 84%->100% — police-albums, THE historical bug, now retrieves all 5 albums in one chunk. hit@k 100%. Round history: flat-800 chunking cov 20% MRR .883 | per-### cov 40% MRR .800 + music-in-film MISS | hierarchical cov 100% MRR .825, no misses. 2026-10-30: +14 held-out cases (holdout:true; written before the reranker experiment, never used for tuning; their MRR is reported as holdout_mrr). Known miss: wes-anderson-look, an indirect description with no name ('symmetrical pastel production design…'); Ebert reviews of design-heavy films outrank the guide. A target for query rewriting/HyDE, not a regression."
+    "_note": "Baseline bumped 2026-08-27 after hierarchical chunking (round 2). Deliberate trade accepted: MRR 0.883->0.825 (a few rank-1s now rank-2; larger merged sections embed more diffusely) in exchange for content coverage 84%->100% — police-albums, THE historical bug, now retrieves all 5 albums in one chunk. hit@k 100%. Round history: flat-800 chunking cov 20% MRR .883 | per-### cov 40% MRR .800 + music-in-film MISS | hierarchical cov 100% MRR .825, no misses. 2026-10-30: +14 held-out cases (holdout:true; written before the reranker experiment, never used for tuning; their MRR is reported as holdout_mrr). Known miss: wes-anderson-look, an indirect description with no name ('symmetrical pastel production design…'); Ebert reviews of design-heavy films outrank the guide. A target for query rewriting/HyDE, not a regression. 2026-11-11: fusion RRF -> weighted (dense 0.7 / BM25 0.3, HYBRID_RANKER). A nightly ingest of 23 Ebert chunks pushed music-in-film out of the RRF top 6 (Ebert reviews ranking on both lists outvoted a guide only the dense side finds). Weighted: MRR 0.772->0.882, holdout_mrr 0.732->0.768, coverage 100%, T3 grounded 4.79/5. MRR floor raised to match."
   },
   "t1": {
     "accuracy": 0.979,

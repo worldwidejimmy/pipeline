@@ -192,7 +192,7 @@ def _kb_item(c: dict) -> dict:
 
 @public.tool(
     title="Search the movie knowledge base",
-    description=("Hybrid (BM25 + dense, RRF-fused) search over a curated movie/TV/music knowledge base: "
+    description=("Hybrid (BM25 + dense, score-fused) search over a curated movie/TV/music knowledge base: "
                  "director and genre guides, decade overviews, and Roger Ebert review excerpts. Returns "
                  "ranked excerpts with their source and cosine similarity, plus a calibrated verdict: "
                  "`relevant` is \"yes\" (best similarity >= 0.60), \"no\" (< 0.45) or \"unsure\" (judge the "

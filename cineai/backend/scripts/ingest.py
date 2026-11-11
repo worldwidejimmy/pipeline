@@ -431,7 +431,7 @@ def main() -> None:
     count = embed_and_insert(client, cfg, chunks)
 
     print(f"\n✓ Hybrid ingest complete: {count} chunks in '{cfg.milvus_collection}'")
-    print(f"  Queries now use BM25 sparse + dense embeddings (RRF fusion).")
+    print(f"  Queries now use BM25 sparse + dense embeddings (weighted score fusion).")
     print(f"  Exact title matches like 'The Dark Knight' will now rank correctly.\n")
 
 
