@@ -382,7 +382,7 @@ make test-api    # run curl smoke tests against running backend
 - Each passage also returns its cosine `similarity` to the query, plus `dense_max` (best dense similarity) for the KB gate — the fused score is relative to the other results, so it can't signal relevance
 - Auto-migration: running `make ingest` on an old dense-only collection drops and recreates it
 - Fallback: if collection has no `sparse_vector` field, retriever silently falls back to dense-only
-- Config: `HYBRID_RANKER=weighted` and `HYBRID_WEIGHTS=0.7,0.3` (dense, BM25); `HYBRID_RANKER=rrf` uses RRF with `HYBRID_RRF_K`. Run `make eval-t2` after changing any of them
+- Config: `HYBRID_RANKER=weighted` and `HYBRID_WEIGHTS=0.7,0.3` (dense, BM25); `HYBRID_RANKER=rrf` uses RRF with `HYBRID_RRF_K`. `DENSE_NPROBE=64` (IVF clusters probed per dense search, of 128; 10 missed ~9% of the exact top 6). Run `make eval-t2` after changing any of them
 
 **Migration note for existing deployments:** If you already have data in `cineai_docs`, run:
 ```bash

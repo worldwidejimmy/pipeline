@@ -41,6 +41,10 @@ class Config:
     # guide that only the dense side finds (music-in-film).
     hybrid_ranker: str = os.getenv("HYBRID_RANKER", "weighted")
     hybrid_weights: str = os.getenv("HYBRID_WEIGHTS", "0.7,0.3")   # dense, BM25
+    # IVF_FLAT probes per dense search (the index has nlist=128 clusters). 10 missed ~9% of the
+    # true top 6 (recall@6 0.907) and, after a Milvus reload, a guide whose exact cosine was the
+    # best of all (kraftwerk-indirect, 2026-11-13). 64: recall 0.995 at ~15 ms; 128 = exact.
+    dense_nprobe: int = int(os.getenv("DENSE_NPROBE", "64"))
     hybrid_rrf_k: int = int(os.getenv("HYBRID_RRF_K", "60"))  # RRF rank fusion k (ranker "rrf")
 
 

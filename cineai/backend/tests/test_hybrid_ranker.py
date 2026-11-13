@@ -56,3 +56,4 @@ def test_config_default_matches():
     from src.config import Config
     c = Config()
     assert (c.hybrid_ranker, c.hybrid_weights) == ("weighted", "0.7,0.3")
+    assert c.dense_nprobe == 64          # 10 missed ~9% of the exact dense top 6 (2026-11-13)

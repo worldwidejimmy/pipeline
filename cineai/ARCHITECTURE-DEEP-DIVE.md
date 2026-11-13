@@ -378,11 +378,14 @@ Points to be able to defend:
   *generates* `sparse_vector` on insert. The ingest path never computes sparse vectors — note that
   `embed_and_insert` inserts only `text`, `dense_vector`, `source` (`ingest.py:166`). Query side
   passes **raw query text** to the sparse `AnnSearchRequest`, not a vector.
-- **IVF_FLAT, not HNSW.** `nlist=128`, searched with `nprobe=10` — i.e. ~8% of clusters probed.
+- **IVF_FLAT, not HNSW.** `nlist=128`, searched with `nprobe=64` (`DENSE_NPROBE`), half the clusters.
   IVF_FLAT keeps full-precision vectors (no quantisation loss) and builds fast; HNSW would give
   better latency/recall at this scale but costs more memory and build time. At the current corpus
-  size this is not the bottleneck. Be honest that the params are defaults: retrieval recall *is*
-  measured now (T2, below), but `nlist`/`nprobe` have never been swept against it.
+  size this is not the bottleneck. `nprobe` was the default 10 until 2026-11-13. Swept against exact
+  search (nprobe 128) on the T2 queries, recall@6 was 0.907 at 10, 0.951 at 16, 0.980 at 32,
+  0.995 at 64 (~15 ms/query) and 1.0 at 128 (~28 ms). The 9% it missed was real: after a reboot
+  reloaded Milvus, the Kraftwerk guide, which had the best exact cosine of all (0.454 vs 0.41), fell
+  outside the 10 probed clusters and T2 paged. `nlist` is still the default.
 - **Metric `IP` (inner product).** OpenAI embeddings are L2-normalised, so IP is equivalent to cosine
   similarity — a common interview follow-up.
 - **BM25 k1=1.2, b=0.75** — the standard Robertson/Sparck-Jones defaults; untuned.
@@ -392,7 +395,7 @@ Points to be able to defend:
 ```python
 # src/tools/milvus_retriever.py:64-86
 dense_req  = AnnSearchRequest(data=[dense_vec], anns_field="dense_vector",
-                              param={"metric_type": "IP", "params": {"nprobe": 10}}, limit=k)
+                              param={"metric_type": "IP", "params": {"nprobe": cfg.dense_nprobe}}, limit=k)
 sparse_req = AnnSearchRequest(data=[query],     anns_field="sparse_vector",
                               param={"metric_type": "BM25"}, limit=k)
 raw = client.hybrid_search(collection_name=cfg.milvus_collection,
@@ -412,7 +415,10 @@ only the dense side found. A nightly ingest of 23 chunks tipped `music-in-film` 
 in BM25's top 30) out of the top 6. Measured on T2: weighted fusion lifted MRR 0.772 → 0.882 and the
 never-tuned holdout cases 0.732 → 0.768, with content coverage unchanged at 100% and T3 grounded
 4.79/5. Dense 0.6/0.4 scored the same; RRF with a wider candidate pool (12 or 20) did not fix it.
-`HYBRID_RANKER=rrf` brings RRF back.
+`HYBRID_RANKER=rrf` brings RRF back. Correction (2026-11-13): those runs used a dense search that probed only 10 of 128 IVF clusters
+(see the index notes below). With `nprobe=64` RRF also reaches 33/34, so the music-in-film miss was
+probably partly a recall problem. Weighted fusion stays because it still ranks better (MRR 0.88 vs
+0.79 for RRF at the same `nprobe`).
 
 `top_k` defaults to **6** (`config.py:30`, now read from the `TOP_K` env var). Note this is a
 single global k — there is no per-route or per-query-type k, so a broad "compare these five
@@ -752,7 +758,7 @@ older port-80 / CDN "flexible" TLS arrangement — treat it as reference, not tr
 | LLM | Anthropic Claude via `langchain_anthropic`, one global tier | Per-node tiering; Groq/OSS; OpenAI | One env var flips the whole app; consistent instruction-following for the grounding rules | Router pays the same model as synthesis; can't use a cheap model for classification and a strong one for synthesis |
 | Vector DB | Milvus 2.5 standalone | Chroma, pgvector, Pinecone, Qdrant | Native BM25 `Function` + `hybrid_search` + rankers server-side; same API scales to distributed | 3 extra containers (etcd, MinIO, Milvus) on a small VPS; heaviest dependency in the stack |
 | Retrieval | Hybrid BM25 + dense, weighted score fusion (0.7 / 0.3) | Dense-only; BM25-only; RRF (used until 2026-11-11) | Dense alone misses exact titles/proper nouns; weighted fusion beat RRF on T2 (MRR 0.77 → 0.88, holdout 0.73 → 0.77) once Ebert reviews outnumbered the guides | Two ANN searches per query (three with the gate's dense-only score); the weights are set on 34 cases; a cross-encoder reranker was measured and rejected (no held-out recall gain) |
-| Dense index | IVF_FLAT, nlist=128, IP, nprobe=10 | HNSW (M/efConstruction/efSearch); IVF_PQ | Full precision, fast build, adequate at this corpus size | Worse latency/recall curve than HNSW at scale; params are defaults, never swept against the T2 recall set |
+| Dense index | IVF_FLAT, nlist=128, IP, nprobe=64 | HNSW (M/efConstruction/efSearch); IVF_PQ | Full precision, fast build, adequate at this corpus size | Worse latency/recall curve than HNSW at scale; `nprobe` swept against exact search (recall@6 0.995 at 64), `nlist` still default |
 | Embeddings | OpenAI `text-embedding-3-small` (1536-d) | `-3-large` (3072-d); bge/E5 local; Ollama nomic | Cheapest credible quality; re-embedding a large review corpus is the main embedding cost | External dependency + key for what could be local; documented Ollama path doesn't exist in code |
 | Transport | SSE via hand-rolled `StreamingResponse` | WebSocket; long-poll; `sse-starlette` | Unidirectional fits exactly; `EventSource` auto-reconnects; passes the CDN with buffering off | No client→server channel (can't cancel a run server-side); token must ride in the URL |
 | Checkpointer | `MemorySaver` | `SqliteSaver`, `PostgresSaver`, Redis | Zero infra, trivial multi-turn | History lost on restart; blocks horizontal scaling; unbounded thread growth |
@@ -875,7 +881,7 @@ The live open-work list is `TODO.md` at the repo root.
   and no error tracker; errors go to stdout and Docker json-file logs.
 - **Small, mostly hand-written eval sets.** 48 routing, 34 retrieval, 14 judged answers, 14 attacks.
   Good enough to catch regressions, too small to tune fine parameters against. `TOP_K`, the fusion weights,
-  `nprobe=10`, `nlist=128` and the BM25 constants are still defaults; only chunking, the KB gate
+  `nlist=128` and the BM25 constants are still defaults (`nprobe` was swept: 64); only chunking, the KB gate
   thresholds and the reranker decision were set by measurement.
 - **The graph, agents and Milvus retriever have few unit tests.** They are covered end to end by
   the evals against live services, which catches regressions but is slower, costs tokens (except
@@ -941,7 +947,7 @@ written only by `synthesise` in a later superstep. The moment I added a second n
 
 **3. How does the hybrid search actually work — what's the fusion math?**
 Two `AnnSearchRequest`s against the same collection: dense against `dense_vector` (IVF_FLAT, IP,
-nprobe=10) with the OpenAI query embedding, and sparse against `sparse_vector` with the **raw query
+nprobe=64) with the OpenAI query embedding, and sparse against `sparse_vector` with the **raw query
 text** — Milvus tokenises it server-side because the field is generated by a BM25 `Function` over an
 analyzer-enabled `text` field. `WeightedRanker(0.7, 0.3)` fuses them: each list's scores are normalised to 0–1 (arctan) and added
 with weights, dense 0.7 and BM25 0.3. It replaced `RRFRanker(k=60)` (`Σ 1/(60 + rank)`) on
@@ -950,9 +956,9 @@ side found, and weighted fusion measured better on T2, holdout cases included.
 
 **4. Why IVF_FLAT and not HNSW?**
 Corpus size didn't justify HNSW's memory and build cost, and IVF_FLAT keeps full-precision vectors.
-Honestly: `nlist=128`/`nprobe=10` are defaults. I now have a labelled retrieval set (T2: hit@k,
-MRR, 14 held-out cases) but haven't swept the index params against it, because at this size they
-aren't where the misses come from. At 100× corpus I'd switch to HNSW and tune
+`nlist=128` is a default. `nprobe` was the default 10 until a T2 page showed it wasn't harmless:
+it found only 91% of the exact dense top 6, and after a Milvus reload it skipped the single best
+match for a holdout case. Swept against exact search, 64 finds 99.5% at ~15 ms, so it's 64 now. At 100× corpus I'd switch to HNSW and tune
 `M`/`efConstruction`/`efSearch` against T2 — after growing it, because 34 cases can't resolve small
 recall differences and tuning without measurement is theatre.
 
@@ -1147,7 +1153,7 @@ an acyclic graph) · **supervisor/router pattern** vs **ReAct** vs **tool-callin
 
 **Retrieval:** **hybrid search** · **sparse vs dense** · **BM25** (`k1=1.2`, `b=0.75`, analyzer-enabled
 VARCHAR, server-side `Function`) · **RRF** — *Reciprocal Rank Fusion*, `Σ 1/(k + rank)`, rank-based; replaced here by
-**weighted fusion** (normalised scores, dense 0.7 / BM25 0.3) · **IVF_FLAT**, **nlist**, **nprobe** (128 / 10 here) ·
+**weighted fusion** (normalised scores, dense 0.7 / BM25 0.3) · **IVF_FLAT**, **nlist**, **nprobe** (128 / 64 here) ·
 **HNSW**, **M**, **efConstruction**, **efSearch** (what you'd move to, not what you have) ·
 **metric type IP vs COSINE vs L2** (IP ≡ cosine on normalised embeddings) · **recall@k** ·
 **cross-encoder reranking** (measured, not shipped) · **relevance gate** (dense cosine 0.60/0.45 +

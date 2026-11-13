@@ -77,7 +77,7 @@ async def retrieve(query: str, top_k: int | None = None) -> dict[str, Any]:
         dense_req = AnnSearchRequest(
             data=[dense_vec],
             anns_field="dense_vector",
-            param={"metric_type": "IP", "params": {"nprobe": 10}},
+            param={"metric_type": "IP", "params": {"nprobe": cfg.dense_nprobe}},
             limit=k,
         )
         # BM25: pass raw text — Milvus tokenises it against the stored corpus
@@ -105,7 +105,7 @@ async def retrieve(query: str, top_k: int | None = None) -> dict[str, Any]:
             collection_name=cfg.milvus_collection,
             data=[dense_vec],
             anns_field="dense_vector",
-            param={"metric_type": "IP"},
+            param={"metric_type": "IP", "params": {"nprobe": cfg.dense_nprobe}},
             limit=k,
             output_fields=["text", "source", "dense_vector"],
         )
@@ -118,7 +118,8 @@ async def retrieve(query: str, top_k: int | None = None) -> dict[str, Any]:
     # threshold was calibrated on (evals/experiments/kb_gate_experiment.py).
     dense_top = await asyncio.to_thread(
         client.search, cfg.milvus_collection, data=[dense_vec], anns_field="dense_vector",
-        search_params={"metric_type": "IP"}, limit=k, output_fields=["source"])
+        search_params={"metric_type": "IP", "params": {"nprobe": cfg.dense_nprobe}},
+        limit=k, output_fields=["source"])
     dense_max = max((h["distance"] for h in dense_top[0]), default=0.0)
 
     latency_ms = int((time.time() - t0) * 1000)
