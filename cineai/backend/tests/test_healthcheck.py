@@ -43,7 +43,7 @@ def test_fail_suffix(tmp_path, monkeypatch):
     assert seen == ["https://hc-ping.com/uuid-1/fail"]
 
 
-def test_slug_form_creates_check_uuid_form_does_not(tmp_path, monkeypatch):
+def test_slug_form_never_auto_creates(tmp_path, monkeypatch):
     _conf(tmp_path, monkeypatch, "HC_PING_KEY=k\nsms_devops=https://hc-ping.com/uuid-1\n")
     seen = []
 
@@ -56,6 +56,6 @@ def test_slug_form_creates_check_uuid_form_does_not(tmp_path, monkeypatch):
     hc.ping("sms_evals", ok=True)
     hc.ping("sms_evals", ok=False)
     hc.ping("sms_devops", ok=False)
-    assert seen == ["https://hc-ping.com/k/sms_evals?create=1",
-                    "https://hc-ping.com/k/sms_evals/fail?create=1",
+    assert seen == ["https://hc-ping.com/k/sms_evals",       # no ?create=1: a typo must 404,
+                    "https://hc-ping.com/k/sms_evals/fail",  # not create a stray check
                     "https://hc-ping.com/uuid-1/fail"]

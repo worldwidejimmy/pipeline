@@ -13,8 +13,9 @@ sends no ping, and healthchecks.io alerts on that.
 
 URLs live in ~/.config/healthchecks.env (chmod 600, outside every repo; this repo is
 public): either one line per check, `<slug>=https://hc-ping.com/<uuid>`, or a project
-`HC_PING_KEY=…` (then the URL is hc-ping.com/<key>/<slug>?create=1, so the first ping creates the
-check; set its schedule in the healthchecks.io UI afterwards). Returns False when
+`HC_PING_KEY=…` (then the URL is hc-ping.com/<key>/<slug>). The checks themselves, with their
+schedules, are created from the server's ops config, never by a ping: no `?create=1`, so a
+misspelled slug gets a 404 (caller emails) instead of quietly creating a stray check. Returns False when
 neither is set or the ping fails, so callers fall back to emailing: a green
 run is never silently dropped.
 
@@ -54,9 +55,7 @@ def ping(slug: str, ok: bool, body: str = "") -> bool:
     if not url:
         print(f"[healthcheck] no URL for {slug} in {CONF} — not pinged", file=sys.stderr)
         return False
-    url = url.rstrip("/")
-    by_slug = "/" in url[len(BASE) + 1:]    # key/slug form, not a per-check UUID URL
-    url += ("" if ok else "/fail") + ("?create=1" if by_slug else "")  # create on first ping
+    url = url.rstrip("/") + ("" if ok else "/fail")
     for attempt in range(3):
         try:
             req = urllib.request.Request(url, data=body.encode()[:MAX_BODY], method="POST")
