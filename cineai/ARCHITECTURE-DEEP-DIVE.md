@@ -283,6 +283,7 @@ synthesiser, but unbounded in *number of threads*). `DELETE /api/history` works 
 | TMDB discover empty | Same pattern | `tmdb_agent.py:150` |
 | MusicBrainz artist not found | Same pattern | `music_agent.py:97` |
 | No Tavily key / Tavily throws | `web_search` returns a formatted "unavailable"/"failed" string; agent detects it and degrades | `web_search.py:17,53` |
+| TMDB / MusicBrainz / web search API down (5xx, 429, timeout, after the client's retries) | The node wrapper turns the HTTP error into a fixed "live data from X is unavailable" note in that agent's slot; the answer is built from the other sources (usually the KB) and a `source_unavailable` event is streamed. Bugs and LLM errors still raise. Before this (2026-11-16), one MusicBrainz 503 made the whole answer a `pipeline_error` | `agents/resilient.py`, `graph/pipeline.py` |
 | Intent JSON unparseable | Caught, logged to stdout, falls back to `search_title` with the raw question | `tmdb_agent.py:114`, `music_agent.py:77` |
 | **All** agents produce nothing | `synthesise` skips the LLM entirely and returns a canned apology | `synthesiser.py:61` |
 | Any exception inside the graph | Caught in `_stream_pipeline`, classified into `rate_limit` / `auth_error` / `connection_error` / generic, **sanitised** of `org_*`/`user_*`/`proj_*` identifiers, emitted as `pipeline_error` | `main.py:235-284` |
@@ -1103,7 +1104,8 @@ waste when its entire output is one token.
 Over: the observability *frontend* — a live step trace, pipeline graph, event log and context
 panel — is far richer than the backend's aggregate view, so I can show a user their own request in
 detail but can only tell you the aggregate through nightly evals and LangSmith, not a live metrics
-dashboard. Under: resilience. Thin retries, no circuit breakers, in-process state. Quality
+dashboard. Under: resilience. Thin retries, no circuit breakers, in-process state. (One step taken:
+a third-party API outage now costs that source, not the whole answer — `agents/resilient.py`.) Quality
 measurement used to be the answer here; it now has seven eval tiers, though the sets are small.
 
 **23. Why one Milvus collection for two very different corpora?**
@@ -1178,7 +1180,8 @@ upload** · **feedback → eval-case triage**.
 layer — an async generator writing to a slow client blocks that stream) · **event-loop blocking** /
 **`asyncio.to_thread`** · **rolling-window rate limiting** · **kill-switch / spend cap** ·
 **mTLS origin authentication** · **CDN client-IP headers and trusted-proxy chains** ·
-**graceful degradation** (Tavily missing → agent returns "unavailable", pipeline still answers).
+**graceful degradation** (Tavily missing, or TMDB/MusicBrainz/search API down → that agent returns
+"unavailable", pipeline still answers).
 
 **Ops:** **healthcheck / `depends_on: service_healthy`** · **derived vs irreplaceable data** (Milvus
 is derived; the JSONL and `.env` are not — hence what `backup.sh` encrypts) · **idempotent

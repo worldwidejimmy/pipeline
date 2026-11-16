@@ -614,7 +614,7 @@ the 30/day cap. Every result records the model id.
 | T0 | parse/contract fixtures, judge-label swap, model-param mapping, the eval gates themselves | $0 | `make test-unit` |
 | T1 | 48 routing questions → expected route (+acceptable alternates, ~20% holdout) | <$0.01 | `make eval-t1` |
 | T2 | 34 retrieval cases (14 `holdout`, never tuned on → `holdout_mrr`): hit@k, MRR, **content coverage**. Known miss: `wes-anderson-look` | ~$0 | `make eval-t2` |
-| T4 | 8 full-pipeline canaries: must-contain facts, must-not-say "couldn't find" | ~$0.01 | `make eval-t4` |
+| T4 | 8 full-pipeline canaries: must-contain facts, must-not-say "couldn't find". A canary that fails while a third-party API is down (5xx/429/timeout, seen as a `source_unavailable` event) is reported as an upstream outage, not a regression, and doesn't fail the gate; a 4xx (e.g. our key rejected) still does | ~$0.01 | `make eval-t4` |
 | T5 | p50/p95 latency, tokens/query, $/query — from the T4 runs | $0 | (with T4) |
 | T6 | MCP interface: a real MCP client over HTTP checks the tool contract against `evals/fixtures/mcp_tools.json`, each tool on a known question, and that the Host/Origin guard refuses | ~$0 | `make eval-t6` |
 | T7 | red team: 11 attacks (3 direct, 8 planted into TMDB/MusicBrainz/web/KB results in-process; subtle ones ×2), graded on what the attack achieved. KB passages are planted at `kb_lookup`'s retrieve and forced past the gate (worst case) | ~$0.015 | `make eval-t7` |

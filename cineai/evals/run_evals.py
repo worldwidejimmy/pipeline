@@ -269,6 +269,23 @@ def check_canary(c: dict, answer: str) -> list[str]:
     return problems
 
 
+_UPSTREAM_5XX = re.compile(r"Server error '(\d{3})[^']*' for url 'https?://([^/']+)")
+
+
+def upstream_outages(events: list[dict], err: str | None) -> list[str]:
+    """Third-party outages seen during one canary run, e.g. ["MusicBrainz 503"]. Pure — unit-tested.
+
+    From `source_unavailable` events (the agent answered without that source,
+    agents/resilient.py) that were transient (5xx, 429, timeout), plus a pipeline_error
+    that is an upstream 5xx (an unwrapped source). A canary that fails ONLY alongside one
+    of these is reported as an upstream outage, not a regression of ours."""
+    out = [f"{e.get('source')} {e.get('status') or 'timeout'}" for e in events if e.get("transient")]
+    m = _UPSTREAM_5XX.search(err or "")
+    if m:
+        out.append(f"{m.group(2)} {m.group(1)}")
+    return out
+
+
 async def run_canaries(verbose: bool) -> tuple[dict, dict]:
     from src.main import _stream_pipeline
 
@@ -277,7 +294,7 @@ async def run_canaries(verbose: bool) -> tuple[dict, dict]:
     rows = []
     for c in cases:                                   # sequential: honest latency numbers
         t0 = time.time()
-        final, any_tok, route, err, done = [], [], None, None, {}
+        final, any_tok, route, err, done, unavailable = [], [], None, None, {}, []
         try:
             async for ev in _stream_pipeline(c["q"], f"eval-{c['id']}-{int(t0)}", client_ip=None,
                                              trace={"source": "eval", "eval_tier": "t4", "metadata": {"case": c["id"]}}):
@@ -286,6 +303,8 @@ async def run_canaries(verbose: bool) -> tuple[dict, dict]:
                     (final if d.get("is_final") else any_tok).append(d.get("content", ""))
                 elif et == "routing_decision":
                     route = d.get("routing")
+                elif et == "source_unavailable":
+                    unavailable.append(d)
                 elif et == "pipeline_error":
                     err = f"{d.get('code')}: {d.get('detail') or d.get('message')}"[:200]
                 elif et == "done":
@@ -294,7 +313,9 @@ async def run_canaries(verbose: bool) -> tuple[dict, dict]:
             err = str(exc)[:150]
         answer = "".join(final) or "".join(any_tok)
         problems = ([err] if err else []) + check_canary(c, answer)
+        upstream = upstream_outages(unavailable, err)
         rows.append({"id": c["id"], "q": c["q"], "ok": not problems, "problems": problems,
+                     "upstream": upstream,     # third-party outages during this run (not ours)
                      "notes": canary_notes(answer),
                      "route": route, "ms": done.get("total_latency_ms") or int((time.time() - t0) * 1000),
                      "tokens_in": done.get("total_prompt_tokens", 0),
@@ -308,13 +329,21 @@ async def run_canaries(verbose: bool) -> tuple[dict, dict]:
             r = rows[-1]
             print(f"  {'✓' if r['ok'] else '✗'} {c['id']:16} {r['route'] or '?':12} "
                   f"{r['ms']/1000:5.1f}s {r['tokens_in']+r['tokens_out']:6} tok"
-                  + ("" if r["ok"] else f"\n      {'; '.join(problems)}"))
+                  + ("" if r["ok"] else f"\n      {'; '.join(problems)}")
+                  + ("" if not upstream else f"\n      upstream outage: {', '.join(upstream)}"))
 
     n = len(rows)
     ok_n = sum(r["ok"] for r in rows)
+    # A canary that failed while a third-party API was down is an outage, not a regression:
+    # reported, but kept out of `failures` (what the gate compares to the baseline).
+    up = sorted(r["id"] for r in rows if not r["ok"] and r["upstream"])
     t4 = {"tier": "t4", "name": "canaries", "at": _now(), "n": n, "pass_rate": round(ok_n / n, 4) if n else 0,
-          "failures": sorted(r["id"] for r in rows if not r["ok"]),
-          "headline": f"{ok_n}/{n} canaries pass", "cases": rows}
+          "failures": sorted(r["id"] for r in rows if not r["ok"] and not r["upstream"]),
+          "upstream_failures": up,
+          "headline": f"{ok_n}/{n} canaries pass" + (
+              " · upstream outage: " + "; ".join(f"{r['id']} ({', '.join(r['upstream'])})"
+                                                 for r in rows if r["id"] in up) if up else ""),
+          "cases": rows}
 
     lat = sorted(r["ms"] for r in rows)
     tin = [r["tokens_in"] for r in rows]
@@ -727,6 +756,9 @@ def gate(res: dict, base_all: dict) -> tuple[str, list[str]]:
         if new:
             failed = True
             msgs.append(f"REGRESSION — canaries failing: {', '.join(new)}")
+        if res.get("upstream_failures"):
+            msgs.append("upstream outage, not a regression (third-party API down): "
+                        + ", ".join(res["upstream_failures"]))
     elif tier == "t3":
         if not res.get("judge_calibrated"):
             failed = True

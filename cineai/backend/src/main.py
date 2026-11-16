@@ -242,6 +242,10 @@ async def _stream_pipeline(question: str, thread_id: str, client_ip: str | None 
                 # What each source returned (shown on demand in the step trace).
                 raw_src = {"tmdb_agent": "_tmdb_raw", "music_agent": "_music_raw",
                            "search_agent": "_search_results"}.get(ename)
+                if output.get("_upstream_error"):
+                    # The source's API failed; the agent answered without it (agents/resilient.py).
+                    yield _sse("source_unavailable", {"agent": ename, **output["_upstream_error"]})
+
                 if raw_src and output.get(raw_src):
                     yield _sse("source_data", {"agent": ename,
                                                "data": _io_data(output[raw_src])})

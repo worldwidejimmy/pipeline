@@ -66,6 +66,9 @@ Deterministic assertions on full-pipeline output for a handful of known-good que
   `couldn't find` / `wasn't able to`.
 - These are blunt but they're exactly what would have screamed during the fenced-JSON
   weeks. Already partly present in `tests/e2e.mjs`.
+- A third-party outage is not our regression: a canary that fails while TMDB/MusicBrainz/web
+  search returned 5xx/429/timeout is listed under `upstream_failures` and kept out of the gate
+  (2026-11-16: a MusicBrainz 503 had turned `cars` red overnight). A 4xx still fails the gate.
 
 ### T5 — Cost & latency · free (metadata we already emit)
 Per-query tokens and wall time are already in the SSE `done` event. Track p50/p95 and

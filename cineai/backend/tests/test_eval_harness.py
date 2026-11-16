@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "evals"))
 
-from run_evals import promotion_decision, query_cost, canary_notes, check_canary, check_redteam, gate, mcp_contract_diff, redteam_notes  # noqa: E402
+from run_evals import promotion_decision, query_cost, canary_notes, check_canary, check_redteam, gate, mcp_contract_diff, redteam_notes, upstream_outages  # noqa: E402
 
 INCEPTION = {"contain_any": ["DiCaprio", "Nolan"], "min_any": 2}
 
@@ -175,3 +175,24 @@ def test_promotion_blocked_when_pricier_or_price_unknown():
     assert promotion_decision([_r("t1")], 0.0010, 0.00109)[0]              # within +10%
     assert not promotion_decision([_r("t1")], 0.0010, None)[0]              # not in PRICES
     assert not promotion_decision([_r("t1")], None, 0.0009)[0]
+
+
+# ── upstream outages (a third-party API down is not a regression of ours) ──────
+
+def test_upstream_outages_from_events_and_unwrapped_5xx():
+    ev = [{"source": "MusicBrainz", "status": 503, "transient": True},
+          {"source": "TMDB", "status": None, "transient": True},
+          {"source": "TMDB", "status": 401, "transient": False}]       # our bad key: a real fault
+    assert upstream_outages(ev, None) == ["MusicBrainz 503", "TMDB timeout"]
+    err = ("pipeline_error: Server error '503 Service Temporarily Unavailable' for url "
+           "'https://musicbrainz.org/ws/2/artist?query=The+Cars&limit=3&fmt=json'")
+    assert upstream_outages([], err) == ["musicbrainz.org 503"]
+    assert upstream_outages([], "pipeline_error: KeyError 'x'") == []
+
+
+def test_gate_upstream_canary_failure_is_not_a_regression():
+    base = {"t4": {"failures": []}}
+    status, msgs = gate({"tier": "t4", "failures": [], "upstream_failures": ["cars"]}, base)
+    assert status == "pass" and any("upstream outage" in m for m in msgs)
+    status, _ = gate({"tier": "t4", "failures": ["cars"], "upstream_failures": []}, base)
+    assert status == "fail"

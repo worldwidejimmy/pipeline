@@ -36,6 +36,7 @@ from src.agents.rag_agent import rag_agent_node
 from src.agents.search_agent import search_agent_node
 from src.agents.music_agent import music_agent_node
 from src.agents.synthesiser import synthesise_node
+from src.agents.resilient import resilient
 
 
 # ── State ─────────────────────────────────────────────────────────────────────
@@ -91,10 +92,12 @@ def build_pipeline():
     g.add_node("understand",       understand_node)
     g.add_node("kb_lookup",        kb_lookup_node)
     g.add_node("supervisor_route", supervisor_route_node)
-    g.add_node("tmdb_agent",       tmdb_agent_node)
+    # Third-party sources degrade to an "unavailable" note on an upstream HTTP error
+    # instead of failing the whole answer (agents/resilient.py).
+    g.add_node("tmdb_agent",       resilient(tmdb_agent_node, result_key="tmdb_result", source="TMDB"))
     g.add_node("rag_agent",        rag_agent_node)
-    g.add_node("search_agent",     search_agent_node)
-    g.add_node("music_agent",      music_agent_node)
+    g.add_node("search_agent",     resilient(search_agent_node, result_key="search_result", source="web search"))
+    g.add_node("music_agent",      resilient(music_agent_node, result_key="music_result", source="MusicBrainz"))
     g.add_node("synthesise",       synthesise_node)
 
     g.add_edge(START, "understand")
