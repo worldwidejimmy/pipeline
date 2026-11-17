@@ -75,7 +75,7 @@ jobs:
           python-version: "3.11"
       # Same dependency set as `make test-unit`: the tests stub the heavy runtime deps
       # (Milvus, LangChain, API clients), so no keys or services are needed.
-      - run: pip install fastapi pytest "mcp==2.3.0" "PyJWT[crypto]>=2.10.0"
+      - run: pip install fastapi pytest httpx "mcp==2.3.0" "PyJWT[crypto]>=2.10.0"
       - run: python -m pytest -q tests/
         working-directory: cineai/backend
 
